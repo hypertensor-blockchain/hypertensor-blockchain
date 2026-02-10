@@ -5,7 +5,7 @@ use crate::{
     AbsentDecreaseReputationFactor, BelowMinWeightDecreaseReputationFactor, ChurnLimit,
     DefaultMaxVectorLength, EmergencySubnetNodeElectionData, EmergencySubnetValidatorData, Error,
     HotkeySubnetNodeId, IdleClassificationEpochs, IncludedClassificationEpochs,
-    IncludedIncreaseReputationFactor, KeyType, LastSubnetDelegateStakeRewardsUpdate, MaxChurnLimit,
+    IncludedIncreaseReputationFactor, LastSubnetDelegateStakeRewardsUpdate, MaxChurnLimit,
     MaxDelegateStakePercentage, MaxIdleClassificationEpochs, MaxIncludedClassificationEpochs,
     MaxMaxRegisteredNodes, MaxQueueEpochs, MaxRegisteredNodes, MaxSubnetBootnodeAccess,
     MaxSubnetMinStake, MaxSubnetNodeMinWeightDecreaseReputationThreshold, MaxSubnetNodes,
@@ -13,14 +13,14 @@ use crate::{
     MinIncludedClassificationEpochs, MinMaxRegisteredNodes, MinNodeReputationFactor,
     MinQueueEpochs, MinSubnetMinStake, MinSubnetNodeReputation, NetworkMaxStakeBalance,
     NodeBurnRateAlpha, NonAttestorDecreaseReputationFactor,
-    NonConsensusAttestorDecreaseReputationFactor, PendingSubnetOwner, QueueImmunityEpochs,
-    RegisteredSubnetNodesData, SubnetBootnodeAccess, SubnetData,
-    SubnetDelegateStakeRewardsPercentage, SubnetDelegateStakeRewardsUpdatePeriod, SubnetKeyTypes,
+    NonConsensusAttestorDecreaseReputationFactor, PeerInfo, PendingSubnetOwner,
+    QueueImmunityEpochs, RegisteredSubnetNodesData, SubnetBootnodeAccess, SubnetData,
+    SubnetDelegateStakeRewardsPercentage, SubnetDelegateStakeRewardsUpdatePeriod,
     SubnetMaxStakeBalance, SubnetMinStakeBalance, SubnetName, SubnetNode, SubnetNodeClass,
     SubnetNodeClassification, SubnetNodeMinWeightDecreaseReputationThreshold,
     SubnetNodeQueueEpochs, SubnetNodesData, SubnetOwner, SubnetPauseCooldownEpochs,
     SubnetRegistrationInitialColdkeys, SubnetRemovalReason, SubnetRepo, SubnetState, SubnetsData,
-    TargetNodeRegistrationsPerEpoch, ValidatorAbsentSubnetNodeReputationFactor,
+    TargetNodeRegistrationsPerEpoch, ValidatorAbsentDecreaseReputationFactor,
     ValidatorNonConsensusSubnetNodeReputationFactor,
 };
 use codec::Decode;
@@ -58,7 +58,6 @@ use sp_std::collections::btree_set::BTreeSet;
 // do_owner_update_included_classification_epochs
 // do_owner_add_or_update_initial_coldkeys -
 // do_owner_remove_initial_coldkeys
-// do_owner_update_key_types
 // do_owner_update_min_max_stake
 // do_owner_update_delegate_stake_percentage
 // do_owner_update_max_registered_nodes
@@ -545,10 +544,12 @@ fn test_owner_unpause_subnet() {
             SubnetNode {
                 id: hotkey_subnet_node_id,
                 hotkey: hotkey.clone(),
-                peer_id: peer(0),
-                bootnode_peer_id: peer(0),
-                client_peer_id: peer(0),
-                bootnode: None,
+                peer_info: PeerInfo {
+                    peer_id: peer(0),
+                    multiaddr: None,
+                },
+                bootnode_peer_info: None,
+                client_peer_info: None,
                 delegate_reward_rate: 10,
                 last_delegate_reward_rate_update: 0,
                 classification: SubnetNodeClassification {
@@ -557,6 +558,7 @@ fn test_owner_unpause_subnet() {
                 },
                 unique: Some(BoundedVec::new()),
                 non_unique: Some(BoundedVec::new()),
+                delegate_account: None,
             },
         );
 
@@ -630,10 +632,12 @@ fn test_owner_unpause_subnet_repause_cooldown_error() {
             SubnetNode {
                 id: hotkey_subnet_node_id,
                 hotkey: hotkey.clone(),
-                peer_id: peer(0),
-                bootnode_peer_id: peer(0),
-                client_peer_id: peer(0),
-                bootnode: None,
+                peer_info: PeerInfo {
+                    peer_id: peer(0),
+                    multiaddr: None,
+                },
+                bootnode_peer_info: None,
+                client_peer_info: None,
                 delegate_reward_rate: 10,
                 last_delegate_reward_rate_update: 0,
                 classification: SubnetNodeClassification {
@@ -642,6 +646,7 @@ fn test_owner_unpause_subnet_repause_cooldown_error() {
                 },
                 unique: Some(BoundedVec::new()),
                 non_unique: Some(BoundedVec::new()),
+                delegate_account: None,
             },
         );
 
@@ -1920,57 +1925,6 @@ fn test_owner_remove_initial_coldkeys_must_be_registering() {
 }
 
 #[test]
-fn test_owner_update_key_types() {
-    new_test_ext().execute_with(|| {
-        increase_epochs(1);
-
-        let subnet_name: Vec<u8> = "subnet-name".into();
-        let deposit_amount: u128 = 10000000000000000000000;
-        let amount: u128 = 1000000000000000000000;
-        let stake_amount: u128 = MinSubnetMinStake::<Test>::get();
-
-        let subnet_id = 1;
-        let subnet_data = SubnetData {
-            id: subnet_id,
-            friendly_id: subnet_id,
-            name: subnet_name.clone(),
-            repo: subnet_name.clone(),
-            description: subnet_name.clone(),
-            misc: subnet_name.clone(),
-            state: SubnetState::Registered,
-            start_epoch: u32::MAX,
-        };
-
-        // Store subnet data
-        SubnetsData::<Test>::insert(subnet_id, &subnet_data);
-
-        let original_owner = account(1);
-
-        // Set initial owner
-        SubnetOwner::<Test>::insert(subnet_id, &original_owner);
-
-        let new_keytypes = BTreeSet::from([KeyType::Ed25519]);
-        assert_ok!(Network::owner_update_key_types(
-            RuntimeOrigin::signed(original_owner.clone()),
-            subnet_id,
-            new_keytypes.clone()
-        ));
-
-        assert_eq!(
-            *network_events().last().unwrap(),
-            Event::SubnetKeyTypesUpdate {
-                subnet_id: subnet_id,
-                owner: original_owner.clone(),
-                value: new_keytypes.clone(),
-            }
-        );
-
-        let key_types = SubnetKeyTypes::<Test>::get(subnet_id);
-        assert_eq!(key_types, new_keytypes.clone());
-    });
-}
-
-#[test]
 fn test_owner_remove_subnet_node() {
     new_test_ext().execute_with(|| {
         let subnet_name: Vec<u8> = "subnet-name".into();
@@ -2745,22 +2699,43 @@ fn test_owner_add_bootnode_access() {
             }
         );
 
+        // let bv = |b: u8| BoundedVec::<u8, DefaultMaxVectorLength>::try_from(vec![b]).unwrap();
+
+        // // Add a bootnode using the added account
+        // let add_set = BTreeSet::from([bv(1), bv(2)]);
+        // assert_ok!(Network::update_bootnodes(
+        //     RuntimeOrigin::signed(new_access.clone()),
+        //     subnet_id,
+        //     add_set.clone(),
+        //     BTreeSet::new(),
+        // ));
+        // Helper to build a bounded vec from bytes
         let bv = |b: u8| BoundedVec::<u8, DefaultMaxVectorLength>::try_from(vec![b]).unwrap();
 
-        // Add a bootnode using the added account
-        let add_set = BTreeSet::from([bv(1), bv(2)]);
+        // --- Case 1: Add bootnodes ---
+        // let add_map = BTreeMap::from([(peer(1), bv(1)), (peer(2), bv(2))]);
+        let add_map = BTreeMap::from([
+            (
+                peer(1),
+                get_multiaddr(Some(subnet_id), Some(1), None).unwrap(),
+            ),
+            (
+                peer(2),
+                get_multiaddr(Some(subnet_id), Some(2), None).unwrap(),
+            ),
+        ]);
         assert_ok!(Network::update_bootnodes(
-            RuntimeOrigin::signed(new_access.clone()),
+            RuntimeOrigin::signed(original_owner.clone()),
             subnet_id,
-            add_set.clone(),
+            add_map.clone(),
             BTreeSet::new(),
         ));
 
         assert_eq!(
             *network_events().last().unwrap(),
             Event::BootnodesUpdated {
-                subnet_id: subnet_id,
-                added: add_set.clone(),
+                subnet_id,
+                added: add_map.clone(),
                 removed: BTreeSet::new(),
             }
         );
@@ -2975,16 +2950,6 @@ fn test_not_subnet_owner_and_invalid_subnet_id() {
                 RuntimeOrigin::signed(fake_owner),
                 subnet_id,
                 remove_coldkeys.clone()
-            ),
-            Error::<Test>::NotSubnetOwner
-        );
-
-        let new_keytypes = BTreeSet::from([KeyType::Ed25519]);
-        assert_err!(
-            Network::owner_update_key_types(
-                RuntimeOrigin::signed(fake_owner),
-                subnet_id,
-                new_keytypes
             ),
             Error::<Test>::NotSubnetOwner
         );
@@ -3327,12 +3292,12 @@ fn test_owner_update_validator_absent_decrease_reputation_factor() {
             )
         );
 
-        let result_value = ValidatorAbsentSubnetNodeReputationFactor::<Test>::get(subnet_id);
+        let result_value = ValidatorAbsentDecreaseReputationFactor::<Test>::get(subnet_id);
         assert_eq!(result_value, new_value);
 
         assert_eq!(
             *network_events().last().unwrap(),
-            Event::ValidatorAbsentSubnetNodeReputationFactorUpdate {
+            Event::ValidatorAbsentDecreaseReputationFactorUpdate {
                 subnet_id: subnet_id,
                 owner: original_owner.clone(),
                 value: new_value

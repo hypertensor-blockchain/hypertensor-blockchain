@@ -118,6 +118,13 @@ impl<T: Config> Pallet<T> {
         }
     }
 
+    pub fn is_subnet_registered(subnet_id: u32) -> Option<bool> {
+        match SubnetsData::<T>::try_get(subnet_id) {
+            Ok(subnet) => Some(subnet.state == SubnetState::Registered),
+            Err(()) => None,
+        }
+    }
+
     pub fn is_subnet_active(subnet_id: u32) -> Option<bool> {
         match SubnetsData::<T>::try_get(subnet_id) {
             Ok(subnet) => Some(subnet.state == SubnetState::Active),
@@ -205,13 +212,13 @@ impl<T: Config> Pallet<T> {
     /// * Note: Each subnet node can have a bootnode and Overwatchers will check those as well
     ///
     /// subnet_id: Subnet ID of bootnode set
-    /// add: Bootnodes to add to set
-    /// remove: Bootnodes to remove from set
+    /// add: Bootnodes to add to set {peer_id, multiaddr}
+    /// remove: Bootnodes to remove from set {peer_id}
     pub fn do_update_bootnodes(
         origin: T::RuntimeOrigin,
         subnet_id: u32,
-        add: BTreeSet<BoundedVec<u8, DefaultMaxVectorLength>>,
-        remove: BTreeSet<BoundedVec<u8, DefaultMaxVectorLength>>,
+        add: BTreeMap<PeerId, BoundedVec<u8, DefaultMaxVectorLength>>,
+        remove: BTreeSet<PeerId>,
     ) -> DispatchResult {
         let account_id: T::AccountId = ensure_signed(origin)?;
 
@@ -235,8 +242,16 @@ impl<T: Config> Pallet<T> {
                 bootnodes.remove(item);
             }
 
-            for item in add.iter() {
-                bootnodes.insert(item.clone());
+            for (peer_id, multiaddr) in add.iter() {
+                // Verify new bootnode
+                let addr: &[u8] = &multiaddr.clone();
+
+                ensure!(
+                    multiaddr::Multiaddr::verify(addr).is_ok(),
+                    Error::<T>::InvalidMultiaddr
+                );
+
+                bootnodes.insert(peer_id.clone(), multiaddr.clone());
             }
 
             ensure!(
@@ -248,55 +263,6 @@ impl<T: Config> Pallet<T> {
         })?;
 
         Self::deposit_event(Event::BootnodesUpdated {
-            subnet_id,
-            added: add,
-            removed: remove,
-        });
-
-        Ok(())
-    }
-
-    pub fn do_update_bootnodes_v2(
-        origin: T::RuntimeOrigin,
-        subnet_id: u32,
-        add: BTreeMap<PeerId, BoundedVec<u8, DefaultMaxVectorLength>>,
-        remove: BTreeSet<PeerId>,
-    ) -> DispatchResult {
-        let account_id: T::AccountId = ensure_signed(origin)?;
-
-        ensure!(
-            SubnetsData::<T>::contains_key(subnet_id),
-            Error::<T>::InvalidSubnetId
-        );
-
-        // Must be owner or have access
-        // The owner has the ability to set access so instead of requiring them to add to the list, we allow them to be the caller
-        ensure!(
-            Self::is_subnet_owner(&account_id, subnet_id).unwrap_or(false)
-                || SubnetBootnodeAccess::<T>::get(subnet_id).contains(&account_id),
-            Error::<T>::InvalidAccess
-        );
-
-        let max_bootnodes = MaxBootnodes::<T>::get();
-
-        SubnetBootnodesV2::<T>::try_mutate(subnet_id, |bootnodes| -> DispatchResult {
-            for item in remove.iter() {
-                bootnodes.remove(item);
-            }
-
-            for (peer_id, data) in add.iter() {
-                bootnodes.insert(peer_id.clone(), data.clone());
-            }
-
-            ensure!(
-                bootnodes.len() <= max_bootnodes as usize,
-                Error::<T>::TooManyBootnodes
-            );
-
-            Ok(())
-        })?;
-
-        Self::deposit_event(Event::BootnodesUpdatedV2 {
             subnet_id,
             added: add,
             removed: remove,
@@ -324,5 +290,13 @@ impl<T: Config> Pallet<T> {
         }
 
         (true, None)
+    }
+
+    pub fn get_friendly_subnet_id(subnet_id: u32) -> Option<u32> {
+        if let Some(subnet_id) = SubnetIdFriendlyUid::<T>::get(subnet_id) {
+            Some(subnet_id)
+        } else {
+            None
+        }
     }
 }

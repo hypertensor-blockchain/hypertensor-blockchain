@@ -3,7 +3,7 @@ import { getDevnetApi } from "../src/substrate"
 import { dev } from "@polkadot-api/descriptors"
 import { PolkadotSigner, TypedApi } from "polkadot-api";
 import { ethers } from "ethers"
-import { generateRandomEd25519PeerId, generateRandomEthersWallet, generateRandomString, getPublicClient, STAKING_CONTRACT_ABI, STAKING_CONTRACT_ADDRESS, SUBNET_CONTRACT_ABI, SUBNET_CONTRACT_ADDRESS, waitForBlocks } from "../src/utils"
+import { generateRandomEd25519PeerId, generateRandomEthersWallet, generateRandomMultiaddr, generateRandomString, getPublicClient, STAKING_CONTRACT_ABI, STAKING_CONTRACT_ADDRESS, SUBNET_CONTRACT_ABI, SUBNET_CONTRACT_ADDRESS, waitForBlocks } from "../src/utils"
 import { Option } from '@polkadot/types';
 import {
     activateSubnet,
@@ -21,7 +21,6 @@ import {
     ownerUpdateDescription,
     ownerUpdateIdleClassificationEpochs,
     ownerUpdateIncludedClassificationEpochs,
-    ownerUpdateKeyTypes,
     ownerUpdateMaxRegisteredNodes,
     ownerUpdateMisc,
     ownerUpdateName,
@@ -98,13 +97,6 @@ describe("Test subnet owner-0xuhnrfvok", () => {
         },
     ];
 
-    const KEY_TYPES = [1, 2]
-
-    const BOOTNODES = [
-        generateRandomString(6),
-        generateRandomString(6)
-    ]
-
     let publicClient: PublicClient;
     let papiApi: TypedApi<typeof dev>
     let api: ApiPromise
@@ -135,7 +127,7 @@ describe("Test subnet owner-0xuhnrfvok", () => {
     // npm test -- -g "testing subnet owner functions-0xARAD3gb3"
     it("testing subnet owner functions-0xARAD3gb3", async () => {
         const subnetContract = new ethers.Contract(SUBNET_CONTRACT_ADDRESS, SUBNET_CONTRACT_ABI, wallet1);
-        
+
         const cost = await getCurrentRegistrationCost(subnetContract, api)
         const subnetName = generateRandomString(30)
         const repo = generateRandomString(30)
@@ -145,8 +137,15 @@ describe("Test subnet owner-0xuhnrfvok", () => {
         const maxStake = await api.query.network.networkMaxStakeBalance();
         const delegateStakePercentage = await api.query.network.minDelegateStakePercentage();
 
+        let BOOTNODES: { peerId: string; multiaddr: Uint8Array }[] = [
+            {
+                peerId: (await generateRandomEd25519PeerId()),
+                multiaddr: await generateRandomMultiaddr((await generateRandomEd25519PeerId()))
+            }
+        ]
+
         await registerSubnet(
-            subnetContract, 
+            subnetContract,
             cost,
             subnetName,
             repo,
@@ -156,7 +155,6 @@ describe("Test subnet owner-0xuhnrfvok", () => {
             maxStake.toString(),
             delegateStakePercentage.toString(),
             initialColdkeys,
-            KEY_TYPES,
             BOOTNODES,
             cost,
         )
@@ -185,26 +183,40 @@ describe("Test subnet owner-0xuhnrfvok", () => {
         await Promise.all([...ALL_WALLETS.entries()].map(async ([coldkey, hotkey]) => {
             const accountSubnetContract = new ethers.Contract(SUBNET_CONTRACT_ADDRESS, SUBNET_CONTRACT_ABI, coldkey);
 
-            const peer1 = await generateRandomEd25519PeerId()
-            const peer2 = await generateRandomEd25519PeerId()
-            const peer3 = await generateRandomEd25519PeerId()
-            const bootnode = generateRandomString(5)
+            let peer1 = await generateRandomEd25519PeerId()
+            let peer_info_1 = {
+                peerId: peer1,
+                multiaddr: await generateRandomMultiaddr(peer1)
+            }
+            let peer_info_2 = {
+                peerId: "",
+                multiaddr: new Uint8Array()
+            }
+            let peer_info_3 = {
+                peerId: "",
+                multiaddr: new Uint8Array()
+            }
+
+            let delegateAccount = {
+                accountId: wallet1.address,
+                rate: BigInt(0)
+            }
             const unique = generateRandomString(5)
             const nonUnique = generateRandomString(5)
 
             await registerSubnetNode(
-                accountSubnetContract, 
+                accountSubnetContract,
                 subnetId,
                 hotkey.address,
-                peer1,
-                peer2,
-                peer3,
-                bootnode,
+                peer_info_1,
+                peer_info_2,
+                peer_info_3,
                 delegateRewardRate,
                 BigInt(minStakeAmount),
                 unique,
                 nonUnique,
-                "100"
+                delegateAccount,
+                "1000000000000000000"
             );
         }));
 
@@ -223,7 +235,6 @@ describe("Test subnet owner-0xuhnrfvok", () => {
         const newSubnetNodeQueueEpochs = (BigInt((await api.query.network.minQueueEpochs()).toString()) + BigInt(1)).toString();
         const newIdleClassificationEpochs = (BigInt((await api.query.network.minIdleClassificationEpochs()).toString()) + BigInt(1)).toString();
         const newIncludedClassificationEpochs = (BigInt((await api.query.network.minIncludedClassificationEpochs()).toString()) + BigInt(1)).toString();
-        const newMaxNodePenalties = (BigInt((await api.query.network.minMaxSubnetNodePenalties()).toString()) + BigInt(1)).toString();
         const newMaxRegisteredNodes = (BigInt((await api.query.network.minMaxRegisteredNodes()).toString()) + BigInt(1)).toString();
         const newTargetNodeRegistrationsPerEpoch = (BigInt(newMaxRegisteredNodes) - BigInt(1)).toString();
         const newNodeBurnRateAlpha = (BigInt((await api.query.network.nodeBurnRateAlpha(subnetId)).toString()) - BigInt(1)).toString();
@@ -232,11 +243,6 @@ describe("Test subnet owner-0xuhnrfvok", () => {
         const wallet9 = generateRandomEthersWallet();
         const wallet10 = generateRandomEthersWallet();
 
-        const newKeyTypes = [3]
-        // 0 => Some(KeyType::Rsa),
-        // 1 => Some(KeyType::Ed25519),
-        // 2 => Some(KeyType::Secp256k1),
-        // 3 => Some(KeyType::Ecdsa),
         await ownerUpdateName(subnetContract, subnetId, newSubnetName)
         let subnetData = await api.query.network.subnetsData(subnetId)
         expect(subnetData != undefined);
@@ -315,15 +321,15 @@ describe("Test subnet owner-0xuhnrfvok", () => {
         expect(currentColdkeysOpt.isSome);
         if (currentColdkeysOpt.isSome) {
             const coldkeysMap = currentColdkeysOpt.unwrap();
-            
+
             // Convert to a plain object for easier comparison
             const coldkeysObj = coldkeysMap.toJSON();
-            
+
             // Check each coldkey exists with the correct count
             for (const entry of addColdkeys) {
                 expect(coldkeysObj[entry.coldkey]).to.equal(entry.count);
             }
-            
+
             // Or check all at once
             initialColdkeys.forEach(entry => {
                 expect(coldkeysObj[entry.coldkey]).to.equal(entry.count);
@@ -344,15 +350,10 @@ describe("Test subnet owner-0xuhnrfvok", () => {
         if (currentColdkeysOpt.isSome) {
             const coldkeysMap = currentColdkeysOpt.unwrap();
             const coldkeysJson = coldkeysMap.toJSON();
-            
+
             // Check that wallet10 doesn't exist
             expect(coldkeysJson[wallet10.address]).to.equal(undefined);
         }
-
-        await ownerUpdateKeyTypes(subnetContract, subnetId, newKeyTypes)
-        const currentKeyTypes = await api.query.network.subnetKeyTypes(subnetId)
-        expect(currentKeyTypes != undefined);
-        expect(currentKeyTypes.toHuman() == newKeyTypes)
 
 
         await ownerUpdateMinMaxStake(subnetContract, subnetId, newMinStake, newMaxStake)
@@ -385,8 +386,13 @@ describe("Test subnet owner-0xuhnrfvok", () => {
         expect((await api.query.network.queueImmunityEpochs(subnetId)).toString()).to.be.equal(newQueueImmunityEpochs)
 
 
-        const addBootnodes = [generateRandomString(6)]
-        const removeBootnodes = [BOOTNODES[0]];
+        const addBootnodes = [
+            {
+                peerId: (await generateRandomEd25519PeerId()),
+                multiaddr: await generateRandomMultiaddr()
+            }
+        ]
+        const removeBootnodes = [BOOTNODES[0].peerId];
 
         await updateBootnodes(
             subnetContract,
@@ -437,8 +443,8 @@ describe("Test subnet owner-0xuhnrfvok", () => {
         // ================
         // get enough delegate stake to meet min delegate stake requirement
         let minDelegateStake = await getMinSubnetDelegateStakeBalance(
-          subnetContract, 
-          subnetId.toString()
+            subnetContract,
+            subnetId.toString()
         );
 
         if (Number(minDelegateStake) < 1000) {
@@ -459,19 +465,19 @@ describe("Test subnet owner-0xuhnrfvok", () => {
         // Delegate stake
         const stakingContract = new ethers.Contract(STAKING_CONTRACT_ADDRESS, STAKING_CONTRACT_ABI, wallet1);
         await addToDelegateStake(
-            stakingContract, 
+            stakingContract,
             subnetId,
             minDelegateStake,
             BigInt(0)
         );
 
         await activateSubnet(
-            subnetContract, 
+            subnetContract,
             subnetId,
         )
 
         subnetData = await api.query.network.subnetsData(subnetId)
-        
+
         expect(subnetData != undefined);
 
         subnetDataOpt = subnetData as Option<any>;

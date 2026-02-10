@@ -2,7 +2,7 @@ use super::mock::*;
 use crate::tests::test_utils::*;
 use crate::Event;
 use crate::{
-    ChurnLimit, HotkeySubnetNodeId, MaxSubnetNodes, MaxSubnets, MinSubnetMinStake,
+    ChurnLimit, HotkeySubnetNodeId, MaxSubnetNodes, MaxSubnets, MinSubnetMinStake, PeerInfo,
     RegisteredSubnetNodesData, SubnetName, SubnetNodeClass, SubnetNodeQueue, SubnetNodeQueueEpochs,
     SubnetNodesData, TotalActiveSubnetNodes, TotalActiveSubnets, TotalSubnetNodes,
 };
@@ -64,12 +64,15 @@ fn test_register_subnet_node_v2() {
             RuntimeOrigin::signed(coldkey.clone()),
             subnet_id,
             hotkey.clone(),
-            peer_id,
-            bootnode_peer_id,
-            client_peer_id,
+            PeerInfo {
+                peer_id: peer_id.clone(),
+                multiaddr: None,
+            },
+            None,
             None,
             0,
             amount,
+            None,
             None,
             None,
             u128::MAX
@@ -147,12 +150,15 @@ fn test_register_subnet_node_v2_and_activate() {
             RuntimeOrigin::signed(coldkey.clone()),
             subnet_id,
             hotkey.clone(),
-            peer_id,
-            bootnode_peer_id,
-            client_peer_id,
+            PeerInfo {
+                peer_id: peer_id.clone(),
+                multiaddr: None,
+            },
+            None,
             None,
             0,
             amount,
+            None,
             None,
             None,
             u128::MAX
@@ -287,12 +293,15 @@ fn test_register_subnet_node_v2_and_activate_max_churn_limit() {
                 RuntimeOrigin::signed(coldkey.clone()),
                 subnet_id,
                 hotkey.clone(),
-                peer_id,
-                bootnode_peer_id,
-                client_peer_id,
+                PeerInfo {
+                    peer_id: peer_id.clone(),
+                    multiaddr: None,
+                },
+                None,
                 None,
                 0,
                 amount,
+                None,
                 None,
                 None,
                 u128::MAX
@@ -459,12 +468,15 @@ fn test_register_subnet_node_v2_with_max_nodes() {
                 RuntimeOrigin::signed(coldkey.clone()),
                 subnet_id,
                 hotkey.clone(),
-                peer_id,
-                bootnode_peer_id,
-                client_peer_id,
+                PeerInfo {
+                    peer_id: peer_id.clone(),
+                    multiaddr: None,
+                },
+                None,
                 None,
                 0,
                 amount,
+                None,
                 None,
                 None,
                 u128::MAX
@@ -618,12 +630,15 @@ fn test_register_subnet_node_v2_activate_up_to_max_nodes() {
                 RuntimeOrigin::signed(coldkey.clone()),
                 subnet_id,
                 hotkey.clone(),
-                peer_id,
-                bootnode_peer_id,
-                client_peer_id,
+                PeerInfo {
+                    peer_id: peer_id.clone(),
+                    multiaddr: None,
+                },
+                None,
                 None,
                 0,
                 amount,
+                None,
                 None,
                 None,
                 u128::MAX

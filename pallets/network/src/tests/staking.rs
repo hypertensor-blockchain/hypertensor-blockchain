@@ -2,7 +2,7 @@ use super::mock::*;
 use crate::tests::test_utils::*;
 use crate::{
     ColdkeyHotkeys, ColdkeySubnetNodes, Error, HotkeyOwner, HotkeySubnetId, HotkeySubnetNodeId,
-    MaxSubnetNodes, MaxSubnets, MinActiveNodeStakeEpochs, MinSubnetMinStake,
+    MaxSubnetNodes, MaxSubnets, MinActiveNodeStakeEpochs, MinSubnetMinStake, PeerInfo,
     RegisteredSubnetNodesData, StakeCooldownEpochs, StakeUnbondingLedger, SubnetMaxStakeBalance,
     SubnetName, SubnetNodeQueueEpochs, SubnetNodesData, SubnetRemovalReason, SubnetsData,
     TotalActiveSubnets, TotalSubnetNodeUids, TotalSubnetNodes, TotalSubnetStake,
@@ -371,14 +371,16 @@ fn test_remove_stake_not_enough_stake_error() {
         build_activated_subnet(subnet_name.clone(), 0, end, deposit_amount, stake_amount);
 
         let subnet_id = SubnetName::<Test>::get(subnet_name.clone()).unwrap();
+        let subnet_id_key_offset = get_subnet_id_key_offset(subnet_id);
+
         let total_subnet_nodes = TotalSubnetNodes::<Test>::get(subnet_id);
         let amount_staked = TotalSubnetStake::<Test>::get(subnet_id);
 
         let max_subnet_nodes = MaxSubnetNodes::<Test>::get();
         let max_subnets = MaxSubnets::<Test>::get();
 
-        let coldkey = get_coldkey(subnet_id, max_subnet_nodes, end);
-        let hotkey = get_hotkey(subnet_id, max_subnet_nodes, max_subnets, end);
+        let coldkey = get_coldkey(subnet_id_key_offset, max_subnet_nodes, end);
+        let hotkey = get_hotkey(subnet_id_key_offset, max_subnet_nodes, max_subnets, end);
 
         let min_stake_epochs = MinActiveNodeStakeEpochs::<Test>::get();
         increase_epochs(min_stake_epochs + 2);
@@ -416,14 +418,16 @@ fn test_remove_stake_min_stake_not_reached_error() {
         build_activated_subnet(subnet_name.clone(), 0, end, deposit_amount, stake_amount);
 
         let subnet_id = SubnetName::<Test>::get(subnet_name.clone()).unwrap();
+        let subnet_id_key_offset = get_subnet_id_key_offset(subnet_id);
+
         let total_subnet_nodes = TotalSubnetNodes::<Test>::get(subnet_id);
         let amount_staked = TotalSubnetStake::<Test>::get(subnet_id);
 
         let max_subnet_nodes = MaxSubnetNodes::<Test>::get();
         let max_subnets = MaxSubnets::<Test>::get();
 
-        let coldkey = get_coldkey(subnet_id, max_subnet_nodes, end);
-        let hotkey = get_hotkey(subnet_id, max_subnet_nodes, max_subnets, end);
+        let coldkey = get_coldkey(subnet_id_key_offset, max_subnet_nodes, end);
+        let hotkey = get_hotkey(subnet_id_key_offset, max_subnet_nodes, max_subnets, end);
 
         let min_stake_epochs = MinActiveNodeStakeEpochs::<Test>::get();
         increase_epochs(min_stake_epochs + 2);
@@ -553,12 +557,15 @@ fn test_remove_stake_min_active_node_stake_epochs() {
             RuntimeOrigin::signed(coldkey.clone()),
             subnet_id,
             hotkey.clone(),
-            peer_id.clone(),
-            bootnode_peer_id.clone(),
-            client_peer_id.clone(),
+            PeerInfo {
+                peer_id: peer_id.clone(),
+                multiaddr: None,
+            },
+            None,
             None,
             0,
             stake_amount,
+            None,
             None,
             None,
             u128::MAX
@@ -895,12 +902,21 @@ fn test_register_try_removing_all_stake_error() {
             RuntimeOrigin::signed(coldkey.clone()),
             subnet_id,
             hotkey.clone(),
-            peer_id,
-            bootnode_peer_id,
-            client_peer_id,
-            None,
+            PeerInfo {
+                peer_id: peer_id.clone(),
+                multiaddr: None,
+            },
+            Some(PeerInfo {
+                peer_id: bootnode_peer_id.clone(),
+                multiaddr: None,
+            }),
+            Some(PeerInfo {
+                peer_id: client_peer_id.clone(),
+                multiaddr: None,
+            }),
             0,
             stake_amount,
+            None,
             None,
             None,
             u128::MAX

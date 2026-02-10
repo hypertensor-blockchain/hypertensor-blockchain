@@ -638,14 +638,19 @@ impl<T: Config> Pallet<T> {
                     //
                     // Update node rep
                     //
-                    let reputation = Self::get_decrease_reputation(
+                    Self::decrease_and_return_node_reputation(
+                        subnet_id,
+                        validator_id,
                         SubnetNodeReputation::<T>::get(subnet_id, validator_id),
-                        ValidatorAbsentSubnetNodeReputationFactor::<T>::get(subnet_id),
+                        ValidatorAbsentDecreaseReputationFactor::<T>::get(subnet_id),
                     );
-                    SubnetNodeReputation::<T>::insert(subnet_id, validator_id, reputation);
+
+                    // NOTE: We don't check if below minimum node reputation here to possibly
+                    // remove the node from the subnet, as this is done in the bank
+
                     // Reads:
                     // - SubnetNodeReputation
-                    // - ValidatorAbsentSubnetNodeReputationFactor
+                    // - ValidatorAbsentDecreaseReputationFactor
                     // Writes:
                     // - SubnetNodeReputation
                     weight = weight.saturating_add(db_weight.reads_writes(2, 1));
@@ -659,9 +664,9 @@ impl<T: Config> Pallet<T> {
         // We take the subnet nodes generated from the validators `propose_attestation` call
         // These are the only nodes that could attest, even if they remove themselves, the attestation
         // counts
-        // If currently in a temporary validator set from an emergency validator set, we only count those as attestors
-        // See `do_attest` to view only these nodes can attest
-
+        //
+        // If currently in a *temporary validator set* from an emergency validator set, we only count those as attestors
+        // See `do_attest` to view only these nodes can attest.
         let max_attestors: u128 = if let Some(emergency_validator_data) =
             EmergencySubnetNodeElectionData::<T>::get(subnet_id)
         {

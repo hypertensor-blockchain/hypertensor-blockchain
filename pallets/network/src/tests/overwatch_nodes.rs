@@ -374,16 +374,17 @@ fn test_set_overwatch_peer_id_errors() {
         let end = min_subnet_nodes;
         build_activated_subnet(subnet_name.clone(), 0, end, deposit_amount, stake_amount);
         let subnet_id = SubnetName::<Test>::get(subnet_name.clone()).unwrap();
+        let subnet_id_key_offset = get_subnet_id_key_offset(subnet_id);
 
         let max_subnets = MaxSubnets::<Test>::get();
         let max_subnet_nodes = MaxSubnetNodes::<Test>::get();
-        let snn_hotkey = get_hotkey(subnet_id, max_subnet_nodes, max_subnets, end);
+        let snn_hotkey = get_hotkey(subnet_id_key_offset, max_subnet_nodes, max_subnets, end);
 
         let hotkey_subnet_node_id =
             HotkeySubnetNodeId::<Test>::get(subnet_id, snn_hotkey.clone()).unwrap();
         let subnet_node_data =
             SubnetNodesData::<Test>::try_get(subnet_id, hotkey_subnet_node_id).unwrap();
-        let snn_peer_id = subnet_node_data.peer_id;
+        let snn_peer_id = subnet_node_data.peer_info.peer_id;
 
         assert_err!(
             Network::set_overwatch_node_peer_id(

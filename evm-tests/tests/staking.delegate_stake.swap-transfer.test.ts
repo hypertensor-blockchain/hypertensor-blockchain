@@ -2,7 +2,7 @@ import { getDevnetApi } from "../src/substrate"
 import { dev } from "@polkadot-api/descriptors"
 import { PolkadotSigner, TypedApi } from "polkadot-api";
 import { ethers } from "ethers"
-import { generateRandomEthersWallet, generateRandomString, getPublicClient, STAKING_CONTRACT_ABI, STAKING_CONTRACT_ADDRESS, SUBNET_CONTRACT_ABI, SUBNET_CONTRACT_ADDRESS } from "../src/utils"
+import { generateRandomEd25519PeerId, generateRandomEthersWallet, generateRandomMultiaddr, generateRandomString, getPublicClient, STAKING_CONTRACT_ABI, STAKING_CONTRACT_ADDRESS, SUBNET_CONTRACT_ABI, SUBNET_CONTRACT_ADDRESS } from "../src/utils"
 import {
     addToDelegateStake,
     getCurrentRegistrationCost,
@@ -76,12 +76,6 @@ describe("test swap and transfer delegate staking-0x454v5v3fc23rh2", () => {
     ];
 
     let publicClient: PublicClient;
-    // init substrate part
-    const KEY_TYPES = [1, 2]
-    const BOOTNODES = [
-        generateRandomString(6),
-        generateRandomString(6)
-    ]
 
     let papiApi: TypedApi<typeof dev>
     let api: ApiPromise
@@ -96,6 +90,13 @@ describe("test swap and transfer delegate staking-0x454v5v3fc23rh2", () => {
     // sudo account alice as signer
     let alice: PolkadotSigner;
     before(async () => {
+        let BOOTNODES: { peerId: string; multiaddr: Uint8Array }[] = [
+            {
+                peerId: (await generateRandomEd25519PeerId()),
+                multiaddr: await generateRandomMultiaddr((await generateRandomEd25519PeerId()))
+            }
+        ]
+
         publicClient = await getPublicClient(ETH_LOCAL_URL)
         // init variables got from await and async
         papiApi = await getDevnetApi()
@@ -128,18 +129,12 @@ describe("test swap and transfer delegate staking-0x454v5v3fc23rh2", () => {
         const repo = generateRandomString(30)
         const description = generateRandomString(30)
         const misc = generateRandomString(30)
-        const churnLimit = await api.query.network.maxChurnLimit();
         const minStake = await api.query.network.minSubnetMinStake();
         const maxStake = await api.query.network.networkMaxStakeBalance();
         const delegateStakePercentage = await api.query.network.minDelegateStakePercentage();
-        const subnetNodeQueueEpochs = await api.query.network.minQueueEpochs();
-        const idleClassificationEpochs = await api.query.network.minIdleClassificationEpochs();
-        const includedClassificationEpochs = await api.query.network.minIncludedClassificationEpochs();
-        const maxNodePenalties = await api.query.network.minMaxSubnetNodePenalties();
-        const maxRegisteredNodes = await api.query.network.minMaxRegisteredNodes();
 
         await registerSubnet(
-            subnetContract, 
+            subnetContract,
             cost,
             subnetName,
             repo,
@@ -149,7 +144,6 @@ describe("test swap and transfer delegate staking-0x454v5v3fc23rh2", () => {
             maxStake.toString(),
             delegateStakePercentage.toString(),
             initialColdkeys,
-            KEY_TYPES,
             BOOTNODES,
             cost,
         )
@@ -163,7 +157,7 @@ describe("test swap and transfer delegate staking-0x454v5v3fc23rh2", () => {
         const misc2 = generateRandomString(30)
 
         await registerSubnet(
-            subnetContract, 
+            subnetContract,
             cost,
             subnetName2,
             repo2,
@@ -173,7 +167,6 @@ describe("test swap and transfer delegate staking-0x454v5v3fc23rh2", () => {
             maxStake.toString(),
             delegateStakePercentage.toString(),
             initialColdkeys,
-            KEY_TYPES,
             BOOTNODES,
             cost,
         )
@@ -192,16 +185,16 @@ describe("test swap and transfer delegate staking-0x454v5v3fc23rh2", () => {
         // Add delegate stake
         // ==================
         const sharesBefore = await stakingContract.accountSubnetDelegateStakeShares(
-          wallet1.address, 
-          fromSubnetId
+            wallet1.address,
+            fromSubnetId
         );
         const balanceBefore = await stakingContract.accountSubnetDelegateStakeBalance(wallet1.address, fromSubnetId);
 
         await addToDelegateStake(
-          stakingContract, 
-          fromSubnetId,
-          stakeAmount,
-          BigInt(0)
+            stakingContract,
+            fromSubnetId,
+            stakeAmount,
+            BigInt(0)
         );
 
         const sharesAfter = await stakingContract.accountSubnetDelegateStakeShares(wallet1.address, fromSubnetId);
@@ -217,10 +210,10 @@ describe("test swap and transfer delegate staking-0x454v5v3fc23rh2", () => {
         const nextSwapId = await api.query.network.nextSwapQueueId();
 
         await swapDelegateStake(
-          stakingContract, 
-          fromSubnetId,
-          toSubnetId,
-          sharesAfter
+            stakingContract,
+            fromSubnetId,
+            toSubnetId,
+            sharesAfter
         );
 
         // Ensure in the queue
@@ -237,13 +230,14 @@ describe("test swap and transfer delegate staking-0x454v5v3fc23rh2", () => {
 
             const swapCallQueueId = human.id;
             const accountIdHuman = human.call.SwapToSubnetDelegateStake.accountId;
-            const toSubnetIdHuman = human.call.SwapToSubnetDelegateStake.toSubnetId;
-            const balanceHuman = human.call.SwapToSubnetDelegateStake.balance;
-            const stringWithoutCommas = balanceHuman.replace(/,/g, "");
+            let toSubnetIdHuman = human.call.SwapToSubnetDelegateStake.toSubnetId;
+            toSubnetIdHuman = toSubnetIdHuman.replace(/,/g, "");
+            let balanceHuman = human.call.SwapToSubnetDelegateStake.balance;
+            balanceHuman = balanceHuman.replace(/,/g, "");
             expect(Number(swapCallQueueId.toString())).to.be.equal(Number(nextSwapId.toString()));
             expect(accountIdHuman).to.be.equal(wallet1.address);
             expect(Number(toSubnetIdHuman)).to.be.equal(Number(toSubnetId));
-            expect(Number(stringWithoutCommas.toString())).to.be.equal(Number(balanceAfter));
+            expect(Number(balanceHuman.toString())).to.be.equal(Number(balanceAfter));
         }
 
         // Ensure shares decreased
@@ -254,7 +248,7 @@ describe("test swap and transfer delegate staking-0x454v5v3fc23rh2", () => {
         expect(fromBalanceAfter).to.be.lessThan(balanceAfter);
 
         console.log("✅ Delegate stake swap testing complete")
-      })
+    })
 
     // Status: passing
     // npm test -- -g "testing transfer delegate stake-0xZPQG6sy123"
@@ -272,10 +266,10 @@ describe("test swap and transfer delegate staking-0x454v5v3fc23rh2", () => {
         // Add delegate stake
         // ==================
         await addToDelegateStake(
-          stakingContract, 
-          fromSubnetId,
-          stakeAmount,
-          BigInt(0)
+            stakingContract,
+            fromSubnetId,
+            stakeAmount,
+            BigInt(0)
         );
 
         // =======================
@@ -299,10 +293,10 @@ describe("test swap and transfer delegate staking-0x454v5v3fc23rh2", () => {
         expect(Number(toBalanceBeforeTransfer)).to.be.equal(0);
 
         await transferDelegateStake(
-          stakingContract, 
-          fromSubnetId,
-          wallet8.address,
-          sharesBeforeTransfer
+            stakingContract,
+            fromSubnetId,
+            wallet8.address,
+            sharesBeforeTransfer
         )
 
         const sharesAfterTransfer = await stakingContract.accountSubnetDelegateStakeShares(wallet2.address, fromSubnetId);

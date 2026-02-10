@@ -323,7 +323,7 @@ fn build_activated_subnet<T: Config>(
         let key_owner = HotkeyOwner::<T>::get(subnet_node_data.hotkey.clone());
         assert_eq!(key_owner, coldkey.clone());
 
-        assert_eq!(subnet_node_data.peer_id, peer_id.clone());
+        assert_eq!(subnet_node_data.peer_info.peer_id, peer_id.clone());
 
         // --- Is ``Validator`` if registered before subnet activation
         assert_eq!(
@@ -530,7 +530,7 @@ fn build_registered_subnet<T: Config>(
         let key_owner = HotkeyOwner::<T>::get(subnet_node_data.hotkey.clone());
         assert_eq!(key_owner, coldkey.clone());
 
-        assert_eq!(subnet_node_data.peer_id, peer_id.clone());
+        assert_eq!(subnet_node_data.peer_info.peer_id, peer_id.clone());
 
         // --- Is ``Validator`` if registered before subnet activation
         assert_eq!(
@@ -699,7 +699,7 @@ fn build_registered_subnet_nodes<T: Config>(
         let key_owner = HotkeyOwner::<T>::get(subnet_node_data.hotkey.clone());
         assert_eq!(key_owner, coldkey.clone());
 
-        assert_eq!(subnet_node_data.peer_id, peer_id.clone());
+        assert_eq!(subnet_node_data.peer_info.peer_id, peer_id.clone());
 
         // --- Is ``Validator`` if registered before subnet activation
         assert_eq!(
@@ -750,8 +750,7 @@ pub fn default_registration_subnet_data<T: Config>(
         max_stake: NetworkMaxStakeBalance::<T>::get(),
         delegate_stake_percentage: 100000000000000000, // 10%
         initial_coldkeys: get_initial_coldkeys::<T>(subnets, max_subnet_nodes, start, end),
-        key_types: BTreeSet::from([KeyType::Rsa]),
-        bootnodes: BTreeSet::from([BoundedVec::new()]),
+        bootnodes: BTreeMap::from([(peer(0), BoundedVec::new())]),
     };
     add_subnet_data
 }
@@ -843,6 +842,7 @@ pub fn insert_subnet_node<T: Config>(
             },
             unique: Some(BoundedVec::new()),
             non_unique: Some(BoundedVec::new()),
+            delegate_account: None,
         },
     );
 }
@@ -1408,7 +1408,7 @@ mod benchmarks {
             let key_owner = HotkeyOwner::<T>::get(subnet_node_data.hotkey.clone());
             assert_eq!(key_owner, coldkey.clone());
 
-            assert_eq!(subnet_node_data.peer_id, peer_id.clone());
+            assert_eq!(subnet_node_data.peer_info.peer_id, peer_id.clone());
 
             // --- Is ``Validator`` if registered before subnet activation
             assert_eq!(
@@ -1970,38 +1970,6 @@ mod benchmarks {
             BTreeMap::from([(rand_account.clone(), 1), (rand_account_2.clone(), 1)]);
         let coldkeys = SubnetRegistrationInitialColdkeys::<T>::get(subnet_id).unwrap();
         assert_eq!(coldkeys, expected_coldkeys.clone());
-    }
-
-    #[benchmark]
-    fn owner_update_key_types() {
-        let max_subnet_nodes = MaxSubnetNodes::<T>::get();
-        build_activated_subnet::<T>(
-            DEFAULT_SUBNET_NAME.into(),
-            0,
-            max_subnet_nodes,
-            DEFAULT_DEPOSIT_AMOUNT,
-            DEFAULT_SUBNET_NODE_STAKE,
-        );
-        let subnet_id = SubnetName::<T>::get::<Vec<u8>>(DEFAULT_SUBNET_NAME.into()).unwrap();
-
-        let min_nodes = MinSubnetNodes::<T>::get();
-        let max_subnets = MaxSubnets::<T>::get();
-        let max_subnet_nodes = MaxSubnetNodes::<T>::get();
-
-        let owner_coldkey =
-            funded_initializer::<T>("subnet_owner", subnet_id * max_subnets * max_subnet_nodes);
-
-        let new_keytypes = BTreeSet::from([KeyType::Ed25519]);
-
-        #[extrinsic_call]
-        owner_update_key_types(
-            RawOrigin::Signed(owner_coldkey.clone()),
-            subnet_id,
-            new_keytypes.clone(),
-        );
-
-        let key_types = SubnetKeyTypes::<T>::get(subnet_id);
-        assert_eq!(key_types, new_keytypes.clone());
     }
 
     #[benchmark]
@@ -4003,7 +3971,7 @@ mod benchmarks {
     }
 
     #[benchmark]
-    fn update_peer_id() {
+    fn update_peer_info() {
         let max_subnet_nodes = MaxSubnetNodes::<T>::get();
         let end = 4;
         build_activated_subnet::<T>(
@@ -4027,7 +3995,7 @@ mod benchmarks {
         let new_peer = peer(1);
 
         #[extrinsic_call]
-        update_peer_id(
+        update_peer_info(
             RawOrigin::Signed(coldkey.clone()),
             subnet_id,
             hotkey_subnet_node_id,
@@ -4041,47 +4009,7 @@ mod benchmarks {
     }
 
     #[benchmark]
-    fn update_bootnode() {
-        let max_subnet_nodes = MaxSubnetNodes::<T>::get();
-        let end = 4;
-        build_activated_subnet::<T>(
-            DEFAULT_SUBNET_NAME.into(),
-            0,
-            end,
-            DEFAULT_DEPOSIT_AMOUNT,
-            DEFAULT_SUBNET_NODE_STAKE,
-        );
-        let subnet_id = SubnetName::<T>::get::<Vec<u8>>(DEFAULT_SUBNET_NAME.into()).unwrap();
-
-        let min_nodes = MinSubnetNodes::<T>::get();
-        let max_subnets = MaxSubnets::<T>::get();
-        let max_subnet_nodes = MaxSubnetNodes::<T>::get();
-
-        let coldkey = get_coldkey::<T>(subnet_id, max_subnet_nodes, end);
-        let hotkey = get_hotkey::<T>(subnet_id, max_subnet_nodes, max_subnets, end);
-        let hotkey_subnet_node_id =
-            HotkeySubnetNodeId::<T>::get(subnet_id, hotkey.clone()).unwrap();
-
-        let bootnode: Vec<u8> = "new-bootnode".into();
-        let bounded_bootnode: BoundedVec<u8, DefaultMaxVectorLength> =
-            bootnode.try_into().expect("String too long");
-
-        #[extrinsic_call]
-        update_bootnode(
-            RawOrigin::Signed(coldkey.clone()),
-            subnet_id,
-            hotkey_subnet_node_id,
-            Some(bounded_bootnode.clone()),
-        );
-
-        assert_eq!(
-            SubnetNodesData::<T>::get(subnet_id, hotkey_subnet_node_id).bootnode,
-            Some(bounded_bootnode.clone())
-        )
-    }
-
-    #[benchmark]
-    fn update_bootnode_peer_id() {
+    fn update_bootnode_peer_info() {
         let max_subnet_nodes = MaxSubnetNodes::<T>::get();
         let end = 4;
         build_activated_subnet::<T>(
@@ -4105,7 +4033,7 @@ mod benchmarks {
         let new_peer = peer(1);
 
         #[extrinsic_call]
-        update_bootnode_peer_id(
+        update_bootnode_peer_info(
             RawOrigin::Signed(coldkey.clone()),
             subnet_id,
             hotkey_subnet_node_id,
@@ -4119,7 +4047,7 @@ mod benchmarks {
     }
 
     #[benchmark]
-    fn update_client_peer_id() {
+    fn update_client_peer_info() {
         let max_subnet_nodes = MaxSubnetNodes::<T>::get();
         let end = 4;
         build_activated_subnet::<T>(
@@ -4143,7 +4071,7 @@ mod benchmarks {
         let new_peer = peer(1);
 
         #[extrinsic_call]
-        update_client_peer_id(
+        update_client_peer_info(
             RawOrigin::Signed(coldkey.clone()),
             subnet_id,
             hotkey_subnet_node_id,

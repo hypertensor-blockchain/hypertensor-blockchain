@@ -69,7 +69,6 @@ impl<T: Config> Pallet<T> {
             return Ok(());
         }
 
-        // Redundant
         Err(Error::<T>::InvalidSubnetNodeId.into())
     }
 
@@ -125,10 +124,10 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
-    pub fn do_update_peer_id(
+    pub fn do_update_peer_info(
         subnet_id: u32,
         subnet_node_id: u32,
-        new_peer_id: PeerId,
+        new_peer_info: PeerInfo,
     ) -> DispatchResult {
         if SubnetNodesData::<T>::contains_key(subnet_id, subnet_node_id) {
             SubnetNodesData::<T>::try_mutate_exists(
@@ -139,7 +138,7 @@ impl<T: Config> Pallet<T> {
                         subnet_id,
                         subnet_node_id,
                         maybe_params,
-                        new_peer_id,
+                        new_peer_info,
                     )
                 },
             )?;
@@ -154,7 +153,7 @@ impl<T: Config> Pallet<T> {
                         subnet_id,
                         subnet_node_id,
                         maybe_params,
-                        new_peer_id,
+                        new_peer_info,
                     )
                 },
             )?;
@@ -162,7 +161,6 @@ impl<T: Config> Pallet<T> {
             return Ok(());
         }
 
-        // Redundant
         Err(Error::<T>::InvalidSubnetNodeId.into())
     }
 
@@ -170,107 +168,117 @@ impl<T: Config> Pallet<T> {
         subnet_id: u32,
         subnet_node_id: u32,
         maybe_params: &mut Option<SubnetNode<T::AccountId>>,
-        new_peer_id: PeerId,
+        new_peer_info: PeerInfo,
     ) -> DispatchResult {
-        ensure!(
-            Self::validate_peer_id(&new_peer_id),
-            Error::<T>::InvalidPeerId
-        );
-
-        ensure!(
-            Self::is_owner_of_peer_or_ownerless(subnet_id, 0, 0, &new_peer_id),
-            Error::<T>::PeerIdExist
-        );
-
         let params = maybe_params
             .as_mut()
             .ok_or(Error::<T>::InvalidSubnetNodeId)?;
 
-        PeerIdSubnetNodeId::<T>::remove(subnet_id, &params.peer_id);
-        PeerIdSubnetNodeId::<T>::insert(subnet_id, &new_peer_id, subnet_node_id);
+        Self::validate_peer_info(subnet_id, 0, 0, &new_peer_info)?;
 
-        params.peer_id = new_peer_id.clone();
+        PeerIdSubnetNodeId::<T>::remove(subnet_id, &params.peer_info.peer_id);
+        if let Some(multiaddr) = params.peer_info.multiaddr.clone() {
+            MultiaddrSubnetNodeId::<T>::remove(subnet_id, multiaddr);
+        }
 
-        Self::deposit_event(Event::SubnetNodeUpdatePeerId {
+        PeerIdSubnetNodeId::<T>::insert(subnet_id, &new_peer_info.peer_id, subnet_node_id);
+
+        if let Some(multiaddr) = new_peer_info.multiaddr.clone() {
+            // Validated in `validate_peer_info`
+            MultiaddrSubnetNodeId::<T>::insert(subnet_id, &multiaddr, subnet_node_id);
+        }
+
+        params.peer_info = new_peer_info.clone();
+
+        Self::deposit_event(Event::SubnetNodeUpdatePeerInfo {
             subnet_id,
             subnet_node_id,
-            peer_id: new_peer_id,
+            peer_info: new_peer_info,
         });
 
         Ok(())
     }
 
-    pub fn do_update_bootnode(
+    // pub fn do_update_bootnode(
+    //     subnet_id: u32,
+    //     subnet_node_id: u32,
+    //     new_bootnode: Option<BoundedVec<u8, DefaultMaxVectorLength>>,
+    // ) -> DispatchResult {
+    //     if let Some(bootnode) = &new_bootnode {
+    //         ensure!(
+    //             Self::is_owner_of_multiaddr_or_ownerless(subnet_id, 0, bootnode.clone()),
+    //             Error::<T>::MultiaddrExist
+    //         );
+    //     }
+
+    //     if SubnetNodesData::<T>::contains_key(subnet_id, subnet_node_id) {
+    //         SubnetNodesData::<T>::try_mutate_exists(
+    //             subnet_id,
+    //             subnet_node_id,
+    //             |maybe_params| -> DispatchResult {
+    //                 Self::perform_update_bootnode(subnet_id, maybe_params, new_bootnode)
+    //             },
+    //         )?;
+
+    //         return Ok(());
+    //     } else if RegisteredSubnetNodesData::<T>::contains_key(subnet_id, subnet_node_id) {
+    //         RegisteredSubnetNodesData::<T>::try_mutate_exists(
+    //             subnet_id,
+    //             subnet_node_id,
+    //             |maybe_params| -> DispatchResult {
+    //                 Self::perform_update_bootnode(subnet_id, maybe_params, new_bootnode)
+    //             },
+    //         )?;
+
+    //         return Ok(());
+    //     }
+
+    //     Err(Error::<T>::InvalidSubnetNodeId.into())
+    // }
+
+    // fn perform_update_bootnode(
+    //     subnet_id: u32,
+    //     maybe_params: &mut Option<SubnetNode<T::AccountId>>,
+    //     new_bootnode: Option<BoundedVec<u8, DefaultMaxVectorLength>>,
+    // ) -> DispatchResult {
+    //     let params = maybe_params
+    //         .as_mut()
+    //         .ok_or(Error::<T>::InvalidSubnetNodeId)?;
+
+    //     if let Some(bootnode) = &params.bootnode {
+    //         // Remove old bootnode
+    //         MultiaddrSubnetNodeId::<T>::remove(subnet_id, bootnode);
+    //     }
+
+    //     if let Some(bootnode) = new_bootnode.clone() {
+    //         // Verify new bootnode
+    //         let multiaddr: &[u8] = &bootnode.clone();
+
+    //         ensure!(
+    //             multiaddr::Multiaddr::verify(multiaddr).is_ok(),
+    //             Error::<T>::InvalidMultiaddr
+    //         );
+
+    //         // Insert new bootnode
+    //         MultiaddrSubnetNodeId::<T>::insert(subnet_id, bootnode, params.id);
+    //     }
+
+    //     // Nodes can update bootnode to None
+    //     params.bootnode = new_bootnode.clone();
+
+    //     Self::deposit_event(Event::SubnetNodeUpdateBootnode {
+    //         subnet_id,
+    //         subnet_node_id: params.id,
+    //         bootnode: new_bootnode,
+    //     });
+
+    //     Ok(())
+    // }
+
+    pub fn do_update_bootnode_peer_info(
         subnet_id: u32,
         subnet_node_id: u32,
-        new_bootnode: Option<BoundedVec<u8, DefaultMaxVectorLength>>,
-    ) -> DispatchResult {
-        if let Some(bootnode) = &new_bootnode {
-            ensure!(
-                Self::is_owner_of_bootnode_or_ownerless(subnet_id, 0, bootnode.clone()),
-                Error::<T>::BootnodeExist
-            );
-        }
-
-        if SubnetNodesData::<T>::contains_key(subnet_id, subnet_node_id) {
-            SubnetNodesData::<T>::try_mutate_exists(
-                subnet_id,
-                subnet_node_id,
-                |maybe_params| -> DispatchResult {
-                    Self::perform_update_bootnode(subnet_id, maybe_params, new_bootnode)
-                },
-            )?;
-
-            return Ok(());
-        } else if RegisteredSubnetNodesData::<T>::contains_key(subnet_id, subnet_node_id) {
-            RegisteredSubnetNodesData::<T>::try_mutate_exists(
-                subnet_id,
-                subnet_node_id,
-                |maybe_params| -> DispatchResult {
-                    Self::perform_update_bootnode(subnet_id, maybe_params, new_bootnode)
-                },
-            )?;
-
-            return Ok(());
-        }
-
-        // Redundant
-        Err(Error::<T>::InvalidSubnetNodeId.into())
-    }
-
-    fn perform_update_bootnode(
-        subnet_id: u32,
-        maybe_params: &mut Option<SubnetNode<T::AccountId>>,
-        new_bootnode: Option<BoundedVec<u8, DefaultMaxVectorLength>>,
-    ) -> DispatchResult {
-        let params = maybe_params
-            .as_mut()
-            .ok_or(Error::<T>::InvalidSubnetNodeId)?;
-
-        if let Some(bootnode) = &params.bootnode {
-            BootnodeSubnetNodeId::<T>::remove(subnet_id, bootnode);
-        }
-
-        if let Some(bootnode) = new_bootnode.clone() {
-            BootnodeSubnetNodeId::<T>::insert(subnet_id, bootnode, params.id);
-        }
-
-        // Nodes can update bootnode to None
-        params.bootnode = new_bootnode.clone();
-
-        Self::deposit_event(Event::SubnetNodeUpdateBootnode {
-            subnet_id,
-            subnet_node_id: params.id,
-            bootnode: new_bootnode,
-        });
-
-        Ok(())
-    }
-
-    pub fn do_update_bootnode_peer_id(
-        subnet_id: u32,
-        subnet_node_id: u32,
-        new_bootnode_peer_id: PeerId,
+        new_bootnode_peer_info: Option<PeerInfo>,
     ) -> DispatchResult {
         if SubnetNodesData::<T>::contains_key(subnet_id, subnet_node_id) {
             SubnetNodesData::<T>::try_mutate_exists(
@@ -281,7 +289,7 @@ impl<T: Config> Pallet<T> {
                         subnet_id,
                         subnet_node_id,
                         maybe_params,
-                        new_bootnode_peer_id,
+                        new_bootnode_peer_info,
                     )
                 },
             )?;
@@ -296,7 +304,7 @@ impl<T: Config> Pallet<T> {
                         subnet_id,
                         subnet_node_id,
                         maybe_params,
-                        new_bootnode_peer_id,
+                        new_bootnode_peer_info,
                     )
                 },
             )?;
@@ -304,7 +312,6 @@ impl<T: Config> Pallet<T> {
             return Ok(());
         }
 
-        // Redundant
         Err(Error::<T>::InvalidSubnetNodeId.into())
     }
 
@@ -312,40 +319,53 @@ impl<T: Config> Pallet<T> {
         subnet_id: u32,
         subnet_node_id: u32,
         maybe_params: &mut Option<SubnetNode<T::AccountId>>,
-        new_bootnode_peer_id: PeerId,
+        new_peer_info: Option<PeerInfo>,
     ) -> DispatchResult {
-        ensure!(
-            Self::validate_peer_id(&new_bootnode_peer_id),
-            Error::<T>::InvalidBootnodePeerId
-        );
-
-        ensure!(
-            Self::is_owner_of_peer_or_ownerless(subnet_id, 0, 0, &new_bootnode_peer_id),
-            Error::<T>::BootnodePeerIdExist
-        );
-
         let params = maybe_params
             .as_mut()
             .ok_or(Error::<T>::InvalidSubnetNodeId)?;
 
-        BootnodePeerIdSubnetNodeId::<T>::remove(subnet_id, &params.bootnode_peer_id);
-        BootnodePeerIdSubnetNodeId::<T>::insert(subnet_id, &new_bootnode_peer_id, subnet_node_id);
+        if let Some(peer_info) = &new_peer_info {
+            Self::validate_peer_info(subnet_id, 0, 0, &peer_info)?;
 
-        params.bootnode_peer_id = new_bootnode_peer_id.clone();
+            // Remove old peer info after validate
+            if let Some(current_peer_info) = &params.bootnode_peer_info {
+                BootnodePeerIdSubnetNodeId::<T>::remove(subnet_id, &current_peer_info.peer_id);
+                if let Some(multiaddr) = &current_peer_info.multiaddr {
+                    MultiaddrSubnetNodeId::<T>::remove(subnet_id, multiaddr);
+                }
+            }
 
-        Self::deposit_event(Event::SubnetNodeUpdateBootnodePeerId {
+            BootnodePeerIdSubnetNodeId::<T>::insert(subnet_id, &peer_info.peer_id, subnet_node_id);
+
+            if let Some(multiaddr) = &peer_info.multiaddr {
+                // Validated in `validate_peer_info`
+                MultiaddrSubnetNodeId::<T>::insert(subnet_id, multiaddr, subnet_node_id);
+            }
+        } else {
+            if let Some(peer_info) = &params.bootnode_peer_info {
+                BootnodePeerIdSubnetNodeId::<T>::remove(subnet_id, &peer_info.peer_id);
+                if let Some(multiaddr) = &peer_info.multiaddr {
+                    MultiaddrSubnetNodeId::<T>::remove(subnet_id, multiaddr);
+                }
+            }
+        }
+
+        params.bootnode_peer_info = new_peer_info.clone();
+
+        Self::deposit_event(Event::SubnetNodeUpdateBootnodePeerInfo {
             subnet_id,
             subnet_node_id,
-            bootnode_peer_id: new_bootnode_peer_id,
+            bootnode_peer_info: new_peer_info.clone(),
         });
 
         Ok(())
     }
 
-    pub fn do_update_client_peer_id(
+    pub fn do_update_client_peer_info(
         subnet_id: u32,
         subnet_node_id: u32,
-        new_client_peer_id: PeerId,
+        new_peer_info: Option<PeerInfo>,
     ) -> DispatchResult {
         if SubnetNodesData::<T>::contains_key(subnet_id, subnet_node_id) {
             SubnetNodesData::<T>::try_mutate_exists(
@@ -356,7 +376,7 @@ impl<T: Config> Pallet<T> {
                         subnet_id,
                         subnet_node_id,
                         maybe_params,
-                        new_client_peer_id,
+                        new_peer_info,
                     )
                 },
             )?;
@@ -371,7 +391,7 @@ impl<T: Config> Pallet<T> {
                         subnet_id,
                         subnet_node_id,
                         maybe_params,
-                        new_client_peer_id,
+                        new_peer_info,
                     )
                 },
             )?;
@@ -379,7 +399,6 @@ impl<T: Config> Pallet<T> {
             return Ok(());
         }
 
-        // Redundant
         Err(Error::<T>::InvalidSubnetNodeId.into())
     }
 
@@ -387,31 +406,62 @@ impl<T: Config> Pallet<T> {
         subnet_id: u32,
         subnet_node_id: u32,
         maybe_params: &mut Option<SubnetNode<T::AccountId>>,
-        new_client_peer_id: PeerId,
+        new_peer_info: Option<PeerInfo>,
     ) -> DispatchResult {
-        ensure!(
-            Self::validate_peer_id(&new_client_peer_id),
-            Error::<T>::InvalidClientPeerId
-        );
-
-        ensure!(
-            Self::is_owner_of_peer_or_ownerless(subnet_id, 0, 0, &new_client_peer_id),
-            Error::<T>::ClientPeerIdExist
-        );
-
         let params = maybe_params
             .as_mut()
             .ok_or(Error::<T>::InvalidSubnetNodeId)?;
 
-        ClientPeerIdSubnetNodeId::<T>::remove(subnet_id, &params.client_peer_id);
-        ClientPeerIdSubnetNodeId::<T>::insert(subnet_id, &new_client_peer_id, subnet_node_id);
+        if let Some(peer_info) = &new_peer_info {
+            Self::validate_peer_info(subnet_id, 0, 0, &peer_info)?;
 
-        params.client_peer_id = new_client_peer_id.clone();
+            if let Some(current_peer_info) = &params.client_peer_info {
+                ClientPeerIdSubnetNodeId::<T>::remove(subnet_id, &current_peer_info.peer_id);
+                if let Some(multiaddr) = current_peer_info.multiaddr.clone() {
+                    MultiaddrSubnetNodeId::<T>::remove(subnet_id, multiaddr);
+                }
+            }
 
-        Self::deposit_event(Event::SubnetNodeUpdateClientPeerId {
+            ClientPeerIdSubnetNodeId::<T>::insert(subnet_id, &peer_info.peer_id, subnet_node_id);
+
+            if let Some(multiaddr) = peer_info.multiaddr.clone() {
+                // Validated in `validate_peer_info`
+                MultiaddrSubnetNodeId::<T>::insert(subnet_id, &multiaddr, subnet_node_id);
+            }
+        } else {
+            if let Some(peer_info) = &params.client_peer_info {
+                ClientPeerIdSubnetNodeId::<T>::remove(subnet_id, &peer_info.peer_id);
+                if let Some(multiaddr) = peer_info.multiaddr.clone() {
+                    MultiaddrSubnetNodeId::<T>::remove(subnet_id, multiaddr);
+                }
+            }
+        }
+
+        params.client_peer_info = new_peer_info.clone();
+
+        // ensure!(
+        //     Self::validate_peer_id(&new_client_peer_id),
+        //     Error::<T>::InvalidClientPeerId
+        // );
+
+        // ensure!(
+        //     Self::is_owner_of_peer_or_ownerless(subnet_id, 0, 0, &new_client_peer_id),
+        //     Error::<T>::ClientPeerIdExist
+        // );
+
+        // let params = maybe_params
+        //     .as_mut()
+        //     .ok_or(Error::<T>::InvalidSubnetNodeId)?;
+
+        // ClientPeerIdSubnetNodeId::<T>::remove(subnet_id, &params.client_peer_id);
+        // ClientPeerIdSubnetNodeId::<T>::insert(subnet_id, &new_client_peer_id, subnet_node_id);
+
+        // params.client_peer_id = new_client_peer_id.clone();
+
+        Self::deposit_event(Event::SubnetNodeUpdateClientPeerInfo {
             subnet_id,
             subnet_node_id,
-            client_peer_id: new_client_peer_id,
+            client_peer_info: new_peer_info,
         });
 
         Ok(())
@@ -444,7 +494,6 @@ impl<T: Config> Pallet<T> {
             return Ok(());
         }
 
-        // Redundant
         Err(Error::<T>::InvalidSubnetNodeId.into())
     }
 
@@ -524,7 +573,6 @@ impl<T: Config> Pallet<T> {
             return Ok(());
         }
 
-        // Redundant
         Err(Error::<T>::InvalidSubnetNodeId.into())
     }
 
@@ -545,6 +593,175 @@ impl<T: Config> Pallet<T> {
             subnet_node_id,
             non_unique: non_unique,
         });
+
+        Ok(())
+    }
+
+    pub fn do_update_delegate_account(
+        subnet_id: u32,
+        subnet_node_id: u32,
+        delegate_account_id: Option<T::AccountId>,
+        delegate_rate: Option<u128>,
+    ) -> DispatchResult {
+        if SubnetNodesData::<T>::contains_key(subnet_id, subnet_node_id) {
+            SubnetNodesData::<T>::try_mutate_exists(
+                subnet_id,
+                subnet_node_id,
+                |maybe_params| -> DispatchResult {
+                    Self::perform_update_delegate_account(
+                        subnet_id,
+                        subnet_node_id,
+                        maybe_params,
+                        delegate_account_id,
+                        delegate_rate,
+                    )
+                },
+            )?;
+
+            return Ok(());
+        } else if RegisteredSubnetNodesData::<T>::contains_key(subnet_id, subnet_node_id) {
+            RegisteredSubnetNodesData::<T>::try_mutate_exists(
+                subnet_id,
+                subnet_node_id,
+                |maybe_params| -> DispatchResult {
+                    Self::perform_update_delegate_account(
+                        subnet_id,
+                        subnet_node_id,
+                        maybe_params,
+                        delegate_account_id,
+                        delegate_rate,
+                    )
+                },
+            )?;
+
+            return Ok(());
+        }
+
+        Err(Error::<T>::InvalidSubnetNodeId.into())
+    }
+
+    fn perform_update_delegate_account(
+        subnet_id: u32,
+        subnet_node_id: u32,
+        maybe_params: &mut Option<SubnetNode<T::AccountId>>,
+        delegate_account_id: Option<T::AccountId>,
+        delegate_rate: Option<u128>,
+    ) -> DispatchResult {
+        let params = maybe_params
+            .as_mut()
+            .ok_or(Error::<T>::InvalidSubnetNodeId)?;
+
+        ensure!(
+            delegate_account_id.is_some() || delegate_rate.is_some(),
+            Error::<T>::InvalidDelegateAccountParameters
+        );
+
+        if delegate_account_id.is_some() || delegate_rate.is_some() {
+            let account_id = if let Some(id) = delegate_account_id {
+                id
+            } else if let Some(existing_delegate_account) = &params.delegate_account {
+                existing_delegate_account.account_id.clone()
+            } else {
+                return Err(Error::<T>::DelegateAccountIdIsNone.into());
+            };
+
+            let rate = if let Some(r) = delegate_rate {
+                r
+            } else if let Some(existing_delegate_account) = &params.delegate_account {
+                existing_delegate_account.rate
+            } else {
+                return Err(Error::<T>::DelegateAccountRateIsNone.into());
+            };
+
+            let delegate_account = DelegateAccount { account_id, rate };
+
+            Self::validate_delegate_account(
+                &delegate_account,
+                &params.hotkey,
+                &HotkeyOwner::<T>::get(&params.hotkey),
+            )?;
+
+            params.delegate_account = Some(delegate_account);
+        } else {
+            params.delegate_account = None;
+        }
+
+        Self::deposit_event(Event::SubnetNodeUpdateDelegateAccount {
+            subnet_id,
+            subnet_node_id,
+            delegate_account: params.delegate_account.clone(),
+        });
+
+        Ok(())
+    }
+
+    pub fn validate_delegate_account(
+        delegate_account: &DelegateAccount<T::AccountId>,
+        hotkey: &T::AccountId,
+        coldkey: &T::AccountId,
+    ) -> DispatchResult {
+        ensure!(
+            delegate_account.account_id != *hotkey,
+            Error::<T>::DelegateAccountCannotBeHotkey
+        );
+        ensure!(
+            delegate_account.account_id != *coldkey,
+            Error::<T>::DelegateAccountCannotBeColdkey
+        );
+        ensure!(
+            delegate_account.rate <= Self::percentage_factor_as_u128() && delegate_account.rate > 0,
+            Error::<T>::InvalidDelegateAccountRate
+        );
+
+        Ok(())
+    }
+
+    pub fn validate_peer_info(
+        subnet_id: u32,
+        subnet_node_id: u32,
+        overwatch_node_id: u32,
+        peer_info: &PeerInfo,
+    ) -> DispatchResult {
+        ensure!(
+            Self::validate_peer_id(&peer_info.peer_id),
+            Error::<T>::InvalidPeerId
+        );
+
+        ensure!(
+            Self::is_owner_of_peer_or_ownerless(
+                subnet_id,
+                subnet_node_id,
+                overwatch_node_id,
+                &peer_info.peer_id
+            ),
+            Error::<T>::PeerIdExist
+        );
+
+        if let Some(peer_multiaddr) = peer_info.multiaddr.clone() {
+            let multiaddr: &[u8] = &peer_multiaddr;
+
+            Self::do_verify_multiaddr(multiaddr)?;
+
+            ensure!(
+                Self::is_owner_of_multiaddr_or_ownerless(
+                    subnet_id,
+                    subnet_node_id,
+                    peer_multiaddr.clone()
+                ),
+                Error::<T>::MultiaddrExist
+            );
+        }
+
+        Ok(())
+    }
+
+    pub fn do_verify_multiaddr(multiaddr: &[u8]) -> DispatchResult {
+        multiaddr::Multiaddr::verify(multiaddr).map_err(|e| match e {
+            multiaddr::MultiaddrError::InvalidVarint => Error::<T>::MultiaddrInvalidVarint,
+            multiaddr::MultiaddrError::InvalidProtocol => Error::<T>::MultiaddrInvalidProtocol,
+            multiaddr::MultiaddrError::InvalidAddress => Error::<T>::MultiaddrInvalidAddress,
+            multiaddr::MultiaddrError::Truncated => Error::<T>::MultiaddrTruncated,
+        })?;
 
         Ok(())
     }
@@ -639,20 +856,32 @@ impl<T: Config> Pallet<T> {
         subnet_node: SubnetNode<T::AccountId>,
     ) {
         let hotkey = subnet_node.hotkey;
-        let peer_id = subnet_node.peer_id;
+        let peer_id = subnet_node.peer_info.peer_id.clone();
 
         if let Some(unique) = subnet_node.unique {
             UniqueParamSubnetNodeId::<T>::remove(subnet_id, unique);
         }
 
-        if let Some(bootnode) = subnet_node.bootnode {
-            BootnodeSubnetNodeId::<T>::remove(subnet_id, bootnode);
-        }
-
         // Remove all subnet node elements
         PeerIdSubnetNodeId::<T>::remove(subnet_id, &peer_id);
-        BootnodePeerIdSubnetNodeId::<T>::remove(subnet_id, subnet_node.bootnode_peer_id);
-        ClientPeerIdSubnetNodeId::<T>::remove(subnet_id, subnet_node.client_peer_id);
+        if let Some(peer_info_multiaddr) = subnet_node.peer_info.multiaddr.clone() {
+            MultiaddrSubnetNodeId::<T>::remove(subnet_id, peer_info_multiaddr);
+        }
+
+        if let Some(bootnode_peer_info) = subnet_node.bootnode_peer_info {
+            BootnodePeerIdSubnetNodeId::<T>::remove(subnet_id, bootnode_peer_info.peer_id);
+            if let Some(bootnode_multiaddr) = bootnode_peer_info.multiaddr.clone() {
+                MultiaddrSubnetNodeId::<T>::remove(subnet_id, bootnode_multiaddr);
+            }
+        }
+
+        if let Some(client_peer_info) = subnet_node.client_peer_info {
+            ClientPeerIdSubnetNodeId::<T>::remove(subnet_id, client_peer_info.peer_id);
+            if let Some(client_multiaddr) = client_peer_info.multiaddr.clone() {
+                MultiaddrSubnetNodeId::<T>::remove(subnet_id, client_multiaddr);
+            }
+        }
+
         HotkeySubnetNodeId::<T>::remove(subnet_id, &hotkey);
         SubnetNodeIdHotkey::<T>::remove(subnet_id, subnet_node_id);
         SubnetNodeReputation::<T>::remove(subnet_id, subnet_node_id);
@@ -841,10 +1070,10 @@ impl<T: Config> Pallet<T> {
                     subnet_node_id: subnet_node_id,
                     coldkey: coldkey.clone(),
                     hotkey: subnet_node.hotkey.clone(),
-                    peer_id: subnet_node.peer_id,
-                    bootnode_peer_id: subnet_node.bootnode_peer_id,
-                    client_peer_id: subnet_node.client_peer_id,
-                    bootnode: subnet_node.bootnode,
+                    peer_info: subnet_node.peer_info,
+                    bootnode_peer_info: subnet_node.bootnode_peer_info,
+                    client_peer_info: subnet_node.client_peer_info,
+                    delegate_account: subnet_node.delegate_account,
                     identity: ColdkeyIdentity::<T>::get(&coldkey),
                     classification: subnet_node.classification,
                     delegate_reward_rate: subnet_node.delegate_reward_rate,
@@ -1026,14 +1255,14 @@ impl<T: Config> Pallet<T> {
             }
     }
 
-    pub fn is_owner_of_bootnode_or_ownerless(
+    pub fn is_owner_of_multiaddr_or_ownerless(
         subnet_id: u32,
         subnet_node_id: u32,
-        bootnode: BoundedVec<u8, DefaultMaxVectorLength>,
+        multiaddr: BoundedVec<u8, DefaultMaxVectorLength>,
     ) -> bool {
-        match BootnodeSubnetNodeId::<T>::try_get(subnet_id, bootnode) {
-            Ok(bootnode_subnet_node_id) => {
-                if bootnode_subnet_node_id == subnet_node_id {
+        match MultiaddrSubnetNodeId::<T>::try_get(subnet_id, multiaddr) {
+            Ok(node_id) => {
+                if node_id == subnet_node_id {
                     return true;
                 }
                 false

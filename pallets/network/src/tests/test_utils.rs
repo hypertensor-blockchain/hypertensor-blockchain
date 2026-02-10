@@ -1,25 +1,25 @@
 use super::mock::*;
 use crate::Event;
 use crate::{
-    AccountOverwatchStake, AccountSubnetDelegateStakeShares, AccountSubnetStake, AttestEntry,
-    BootnodePeerIdSubnetNodeId, ColdkeyHotkeys, ColdkeyReputation, ColdkeySubnetNodes,
-    ConsensusData, HotkeyOverwatchNodeId, HotkeyOwner, HotkeySubnetId, HotkeySubnetNodeId, KeyType,
+    multiaddr::*, AccountOverwatchStake, AccountSubnetDelegateStakeShares, AccountSubnetStake,
+    AttestEntry, BootnodePeerIdSubnetNodeId, ClientPeerIdSubnetNodeId, ColdkeyHotkeys,
+    ColdkeyReputation, ColdkeySubnetNodes, ConsensusData, DefaultMaxVectorLength, DelegateAccount,
+    HotkeyOverwatchNodeId, HotkeyOwner, HotkeySubnetId, HotkeySubnetNodeId, InitialColdkeyData,
     MaxMaxRegisteredNodes, MaxOverwatchNodes, MaxSubnetNodes, MaxSubnets, MinSubnetMinStake,
-    MinSubnetNodes, MinSubnetRegistrationEpochs, NetworkMaxStakeBalance,
+    MinSubnetNodes, MinSubnetRegistrationEpochs, MultiaddrSubnetNodeId, NetworkMaxStakeBalance,
     OverwatchCommitCutoffPercent, OverwatchEpochLengthMultiplier, OverwatchMinAge,
     OverwatchMinStakeBalance, OverwatchNode, OverwatchNodeIdHotkey, OverwatchNodes,
-    OverwatchReveals, PeerIdSubnetNodeId, RegisteredSubnetNodesData, RegistrationSubnetData,
-    Reputation, StakeCooldownEpochs, StakeUnbondingLedger, SubnetConsensusSubmission, SubnetData,
-    SubnetElectedValidator, SubnetIdFriendlyUid, SubnetMaxStakeBalance, SubnetMinStakeBalance,
-    SubnetName, SubnetNode, SubnetNodeClass, SubnetNodeClassification, SubnetNodeConsensusData,
-    SubnetNodeElectionSlots, SubnetNodeIdHotkey, SubnetNodeReputation, SubnetNodesData,
-    SubnetOwner, SubnetRegistrationEpoch, SubnetRegistrationEpochs,
-    SubnetRegistrationInitialColdkeys, SubnetReputation, SubnetSlot, SubnetState, SubnetsData,
-    TotalActiveNodes, TotalActiveSubnetNodes, TotalActiveSubnets, TotalOverwatchNodeUids,
-    TotalOverwatchNodes, TotalOverwatchStake, TotalStake, TotalSubnetDelegateStakeBalance,
-    TotalSubnetNodeUids, TotalSubnetNodes, TotalSubnetStake, TotalSubnetUids,
-    UniqueParamSubnetNodeId, DefaultMaxVectorLength, ClientPeerIdSubnetNodeId, TotalNodes,
-    SubnetNodeQueue, InitialColdkeyData,
+    OverwatchReveals, PeerIdSubnetNodeId, PeerInfo, RegisteredSubnetNodesData,
+    RegistrationSubnetData, Reputation, StakeCooldownEpochs, StakeUnbondingLedger,
+    SubnetConsensusSubmission, SubnetData, SubnetElectedValidator, SubnetIdFriendlyUid,
+    SubnetMaxStakeBalance, SubnetMinStakeBalance, SubnetName, SubnetNode, SubnetNodeClass,
+    SubnetNodeClassification, SubnetNodeConsensusData, SubnetNodeElectionSlots, SubnetNodeIdHotkey,
+    SubnetNodeQueue, SubnetNodeReputation, SubnetNodesData, SubnetOwner, SubnetRegistrationEpoch,
+    SubnetRegistrationEpochs, SubnetRegistrationInitialColdkeys, SubnetReputation, SubnetSlot,
+    SubnetState, SubnetsData, TotalActiveNodes, TotalActiveSubnetNodes, TotalActiveSubnets,
+    TotalNodes, TotalOverwatchNodeUids, TotalOverwatchNodes, TotalOverwatchStake, TotalStake,
+    TotalSubnetDelegateStakeBalance, TotalSubnetNodeUids, TotalSubnetNodes, TotalSubnetStake,
+    TotalSubnetUids, UniqueParamSubnetNodeId,
 };
 use fp_account::AccountId20;
 use frame_support::assert_ok;
@@ -40,6 +40,7 @@ pub const DEFAULT_SCORE: u128 = 500000000000000000;
 pub const DEFAULT_REGISTRATION_BLOCKS: u32 = 130_000;
 pub const DEFAULT_DELEGATE_REWARD_RATE: u128 = 100000000000000000; // 10%
 pub const ALICE_EXPECTED_BALANCE: u128 = 1000000000000000000000000; // 1,000,000
+pub const STARTING_SUBNET_ID: u32 = 128000;
 
 pub fn account(id: u32) -> AccountIdOf<Test> {
     let hash = keccak_256(&id.to_le_bytes());
@@ -140,6 +141,43 @@ pub fn make_commit(weight: u128, salt: Vec<u8>) -> sp_core::H256 {
     Hashing::hash_of(&(weight, salt))
 }
 
+pub fn get_subnet_id_key_offset(active_subnets: u32) -> u32 {
+    active_subnets - STARTING_SUBNET_ID
+}
+
+pub fn get_multiaddr(
+    subnet_id: Option<u32>,
+    subnet_node_id: Option<u32>,
+    offset: Option<u8>,
+) -> Option<BoundedVec<u8, DefaultMaxVectorLength>> {
+    let ip_append = if let Some(subnet_id) = subnet_id {
+        &[127, 0, offset.unwrap_or(0), subnet_id as u8]
+    } else {
+        &[127, 0, 0, 1]
+    };
+
+    let port_append = if let Some(subnet_node_id) = subnet_node_id {
+        (30303u16 + subnet_node_id as u16).to_be_bytes()
+    } else {
+        30303u16.to_be_bytes()
+    };
+
+    let peer = PeerId::new([1u8; 32].to_vec());
+    let mut bytes = vec![];
+    encode_varint(IP4, &mut bytes);
+    bytes.extend_from_slice(ip_append);
+    encode_varint(TCP, &mut bytes);
+    bytes.extend_from_slice(&port_append);
+    encode_varint(P2P, &mut bytes);
+    encode_varint(peer.0.len() as u64, &mut bytes);
+    bytes.extend_from_slice(&peer.0);
+
+    let ma = Multiaddr::verify(&bytes).unwrap();
+    let segs = ma.to_vec().unwrap();
+
+    Some(bytes.try_into().expect("bootnode too long"))
+}
+
 pub fn build_activated_subnet(
     subnet_name: Vec<u8>,
     start: u32,
@@ -156,12 +194,13 @@ pub fn build_activated_subnet(
     let block_number = System::block_number();
     let epoch = System::block_number().saturating_div(epoch_length);
 
-    let subnets = TotalActiveSubnets::<Test>::get() + 1;
+    let subnets = TotalSubnetUids::<Test>::get() + 1;
+    let subnet_id_key_offset = get_subnet_id_key_offset(subnets);
     let max_subnets = MaxSubnets::<Test>::get();
     let max_subnet_nodes = MaxSubnetNodes::<Test>::get();
 
-    let owner_coldkey = account(subnets * max_subnets * max_subnet_nodes);
-    let owner_hotkey = account(subnets * max_subnets * max_subnet_nodes + 1);
+    let owner_coldkey = account(subnet_id_key_offset * max_subnets * max_subnet_nodes);
+    let owner_hotkey = account(subnet_id_key_offset * max_subnets * max_subnet_nodes + 1);
 
     let cost = Network::get_current_registration_cost(block_number);
     let alice_balance = Balances::free_balance(&alice.clone());
@@ -182,7 +221,7 @@ pub fn build_activated_subnet(
     }
 
     let add_subnet_data: RegistrationSubnetData<AccountId> = default_registration_subnet_data(
-        subnets,
+        subnet_id_key_offset,
         max_subnet_nodes,
         subnet_name.clone().into(),
         start,
@@ -192,7 +231,7 @@ pub fn build_activated_subnet(
     // Give each coldkey balance
     // for n in start..end {
     //     let _n = n + 1;
-    //     let coldkey = get_coldkey(subnets, max_subnet_nodes, _n);
+    //     let coldkey = get_coldkey(subnet_id_key_offset, max_subnet_nodes, _n);
     // }
 
     // --- Register subnet for activation
@@ -211,11 +250,7 @@ pub fn build_activated_subnet(
 
     let friendly_subnet_id = SubnetIdFriendlyUid::<Test>::get(subnet_id).unwrap();
     assert_ne!(friendly_subnet_id, 0);
-
-    // let min_stake = SubnetMinStakeBalance::<Test>::get(subnet_id);
-    // let max_stake = SubnetMaxStakeBalance::<Test>::get(subnet_id);
-    // assert_eq!(min_stake, add_subnet_data.min_stake);
-    // assert_eq!(max_stake, add_subnet_data.max_stake);
+    assert_eq!(friendly_subnet_id, subnet.friendly_id);
 
     let epoch_length = EpochLength::get();
     let epoch = System::block_number() / epoch_length;
@@ -228,11 +263,13 @@ pub fn build_activated_subnet(
     let burn_amount = Network::calculate_burn_amount(subnet_id);
     for n in start..end {
         let _n = n + 1;
-        let coldkey = get_coldkey(subnets, max_subnet_nodes, _n);
-        let hotkey = get_hotkey(subnets, max_subnet_nodes, max_subnets, _n);
-        let peer_id = get_peer_id(subnets, max_subnet_nodes, max_subnets, _n);
-        let bootnode_peer_id = get_bootnode_peer_id(subnets, max_subnet_nodes, max_subnets, _n);
-        let client_peer_id = get_client_peer_id(subnets, max_subnet_nodes, max_subnets, _n);
+        let coldkey = get_coldkey(subnet_id_key_offset, max_subnet_nodes, _n);
+        let hotkey = get_hotkey(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
+        let peer_id = get_peer_id(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
+        let bootnode_peer_id =
+            get_bootnode_peer_id(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
+        let client_peer_id =
+            get_client_peer_id(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
 
         if Balances::free_balance(&alice.clone()) <= amount {
             let _ = Balances::deposit_creating(&alice.clone(), amount + 500);
@@ -249,12 +286,21 @@ pub fn build_activated_subnet(
             RuntimeOrigin::signed(coldkey.clone()),
             subnet_id,
             hotkey.clone(),
-            peer_id.clone(),
-            bootnode_peer_id.clone(),
-            client_peer_id.clone(),
-            None,
+            PeerInfo {
+                peer_id: peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), None),
+            },
+            Some(PeerInfo {
+                peer_id: bootnode_peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), Some(1)),
+            }),
+            Some(PeerInfo {
+                peer_id: client_peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), Some(2)),
+            }),
             0,
             amount,
+            None,
             None,
             None,
             u128::MAX
@@ -290,7 +336,46 @@ pub fn build_activated_subnet(
         let key_owner = HotkeyOwner::<Test>::get(subnet_node_data.hotkey.clone());
         assert_eq!(key_owner, coldkey.clone());
 
-        assert_eq!(subnet_node_data.peer_id, peer_id.clone());
+        assert_eq!(subnet_node_data.peer_info.peer_id, peer_id.clone());
+
+        let multiaddr_subnet_node_id = MultiaddrSubnetNodeId::<Test>::get(
+            subnet_id,
+            get_multiaddr(Some(subnet_id), Some(hotkey_subnet_node_id), None).unwrap(),
+        );
+        assert_eq!(multiaddr_subnet_node_id, hotkey_subnet_node_id);
+        assert_eq!(
+            subnet_node_data.peer_info,
+            PeerInfo {
+                peer_id: peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), None),
+            }
+        );
+
+        let bootnode_multiaddr_subnet_node_id = MultiaddrSubnetNodeId::<Test>::get(
+            subnet_id,
+            get_multiaddr(Some(subnet_id), Some(hotkey_subnet_node_id), Some(1)).unwrap(),
+        );
+        assert_eq!(bootnode_multiaddr_subnet_node_id, hotkey_subnet_node_id);
+        assert_eq!(
+            subnet_node_data.bootnode_peer_info,
+            Some(PeerInfo {
+                peer_id: bootnode_peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), Some(1)),
+            })
+        );
+
+        let client_multiaddr_subnet_node_id = MultiaddrSubnetNodeId::<Test>::get(
+            subnet_id,
+            get_multiaddr(Some(subnet_id), Some(hotkey_subnet_node_id), Some(2)).unwrap(),
+        );
+        assert_eq!(client_multiaddr_subnet_node_id, hotkey_subnet_node_id);
+        assert_eq!(
+            subnet_node_data.client_peer_info,
+            Some(PeerInfo {
+                peer_id: client_peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), Some(2)),
+            })
+        );
 
         // --- Is ``Validator`` if registered before subnet activation
         assert_eq!(
@@ -380,8 +465,6 @@ pub fn build_activated_subnet(
 
     let subnet = SubnetsData::<Test>::get(subnet_id).unwrap();
     assert_eq!(subnet.state, SubnetState::Active);
-
-    // increase_epochs(2);
 }
 
 pub fn build_activated_subnet_new_excess_subnets(
@@ -401,12 +484,13 @@ pub fn build_activated_subnet_new_excess_subnets(
     let block_number = System::block_number();
     let epoch = System::block_number().saturating_div(epoch_length);
 
-    let subnets = TotalActiveSubnets::<Test>::get() + 1;
+    let subnets = TotalSubnetUids::<Test>::get() + 1;
+    let subnet_id_key_offset = get_subnet_id_key_offset(subnets);
     let max_subnets = MaxSubnets::<Test>::get().saturating_add(excess);
     let max_subnet_nodes = MaxSubnetNodes::<Test>::get();
 
-    let owner_coldkey = account(subnets * max_subnets * max_subnet_nodes);
-    let owner_hotkey = account(subnets * max_subnets * max_subnet_nodes + 1);
+    let owner_coldkey = account(subnet_id_key_offset * max_subnets * max_subnet_nodes);
+    let owner_hotkey = account(subnet_id_key_offset * max_subnets * max_subnet_nodes + 1);
 
     let cost = Network::get_current_registration_cost(block_number);
 
@@ -428,7 +512,7 @@ pub fn build_activated_subnet_new_excess_subnets(
     }
 
     let add_subnet_data: RegistrationSubnetData<AccountId> = default_registration_subnet_data(
-        subnets,
+        subnet_id_key_offset,
         max_subnet_nodes,
         subnet_name.clone().into(),
         start,
@@ -465,14 +549,16 @@ pub fn build_activated_subnet_new_excess_subnets(
     let burn_amount = Network::calculate_burn_amount(subnet_id);
     for n in start..end {
         let _n = n + 1;
-        let coldkey = get_coldkey(subnets, max_subnet_nodes, _n);
-        let hotkey = get_hotkey(subnets, max_subnet_nodes, max_subnets, _n);
-        let coldkey_n = get_coldkey_n(subnets, max_subnet_nodes, _n);
-        let hotkey_n = get_hotkey_n(subnets, max_subnet_nodes, max_subnets, _n);
+        let coldkey = get_coldkey(subnet_id_key_offset, max_subnet_nodes, _n);
+        let hotkey = get_hotkey(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
+        let coldkey_n = get_coldkey_n(subnet_id_key_offset, max_subnet_nodes, _n);
+        let hotkey_n = get_hotkey_n(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
 
-        let peer_id = get_peer_id(subnets, max_subnet_nodes, max_subnets, _n);
-        let bootnode_peer_id = get_bootnode_peer_id(subnets, max_subnet_nodes, max_subnets, _n);
-        let client_peer_id = get_client_peer_id(subnets, max_subnet_nodes, max_subnets, _n);
+        let peer_id = get_peer_id(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
+        let bootnode_peer_id =
+            get_bootnode_peer_id(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
+        let client_peer_id =
+            get_client_peer_id(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
 
         if Balances::free_balance(&alice.clone()) <= amount {
             let _ = Balances::deposit_creating(&alice.clone(), amount + 500);
@@ -489,12 +575,21 @@ pub fn build_activated_subnet_new_excess_subnets(
             RuntimeOrigin::signed(coldkey.clone()),
             subnet_id,
             hotkey.clone(),
-            peer_id.clone(),
-            bootnode_peer_id.clone(),
-            client_peer_id.clone(),
-            None,
+            PeerInfo {
+                peer_id: peer_id.clone(),
+                multiaddr: None,
+            },
+            Some(PeerInfo {
+                peer_id: bootnode_peer_id.clone(),
+                multiaddr: None,
+            }),
+            Some(PeerInfo {
+                peer_id: client_peer_id.clone(),
+                multiaddr: None,
+            }),
             0,
             amount,
+            None,
             None,
             None,
             u128::MAX
@@ -521,7 +616,7 @@ pub fn build_activated_subnet_new_excess_subnets(
         let key_owner = HotkeyOwner::<Test>::get(subnet_node_data.hotkey.clone());
         assert_eq!(key_owner, coldkey.clone());
 
-        assert_eq!(subnet_node_data.peer_id, peer_id.clone());
+        assert_eq!(subnet_node_data.peer_info.peer_id, peer_id.clone());
 
         // --- Is ``Validator`` if registered before subnet activation
         assert_eq!(
@@ -633,11 +728,13 @@ pub fn build_registered_subnet_new(
 
     // let subnets = TotalActiveSubnets::<Test>::get() + 1;
     let subnets = TotalSubnetUids::<Test>::get() + 1;
+    let subnet_id_key_offset = get_subnet_id_key_offset(subnets);
+
     let max_subnets = MaxSubnets::<Test>::get();
     let max_subnet_nodes = MaxSubnetNodes::<Test>::get();
 
-    let owner_coldkey = account(subnets * max_subnets * max_subnet_nodes);
-    let owner_hotkey = account(subnets * max_subnets * max_subnet_nodes + 1);
+    let owner_coldkey = account(subnet_id_key_offset * max_subnets * max_subnet_nodes);
+    let owner_hotkey = account(subnet_id_key_offset * max_subnets * max_subnet_nodes + 1);
 
     let cost = Network::get_current_registration_cost(block_number);
 
@@ -660,7 +757,7 @@ pub fn build_registered_subnet_new(
 
     let add_subnet_data = if add_subnet_data.is_none() {
         default_registration_subnet_data(
-            subnets,
+            subnet_id_key_offset,
             max_subnet_nodes,
             subnet_name.clone().into(),
             start,
@@ -694,11 +791,13 @@ pub fn build_registered_subnet_new(
     let burn_amount = Network::calculate_burn_amount(subnet_id);
     for n in start..end {
         let _n = n + 1;
-        let coldkey = get_coldkey(subnets, max_subnet_nodes, _n);
-        let hotkey = get_hotkey(subnets, max_subnet_nodes, max_subnets, _n);
-        let peer_id = get_peer_id(subnets, max_subnet_nodes, max_subnets, _n);
-        let bootnode_peer_id = get_bootnode_peer_id(subnets, max_subnet_nodes, max_subnets, _n);
-        let client_peer_id = get_client_peer_id(subnets, max_subnet_nodes, max_subnets, _n);
+        let coldkey = get_coldkey(subnet_id_key_offset, max_subnet_nodes, _n);
+        let hotkey = get_hotkey(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
+        let peer_id = get_peer_id(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
+        let bootnode_peer_id =
+            get_bootnode_peer_id(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
+        let client_peer_id =
+            get_client_peer_id(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
         if Balances::free_balance(&alice.clone()) <= amount {
             let _ = Balances::deposit_creating(&alice.clone(), amount + 500);
         }
@@ -715,12 +814,21 @@ pub fn build_registered_subnet_new(
             RuntimeOrigin::signed(coldkey.clone()),
             subnet_id,
             hotkey.clone(),
-            peer_id.clone(),
-            bootnode_peer_id.clone(),
-            client_peer_id.clone(),
-            None,
+            PeerInfo {
+                peer_id: peer_id.clone(),
+                multiaddr: None,
+            },
+            Some(PeerInfo {
+                peer_id: bootnode_peer_id.clone(),
+                multiaddr: None,
+            }),
+            Some(PeerInfo {
+                peer_id: client_peer_id.clone(),
+                multiaddr: None,
+            }),
             0,
             amount,
+            None,
             None,
             None,
             u128::MAX
@@ -746,7 +854,7 @@ pub fn build_registered_subnet_new(
         let key_owner = HotkeyOwner::<Test>::get(subnet_node_data.hotkey.clone());
         assert_eq!(key_owner, coldkey.clone());
 
-        assert_eq!(subnet_node_data.peer_id, peer_id.clone());
+        assert_eq!(subnet_node_data.peer_info.peer_id, peer_id.clone());
 
         // --- Is ``Validator`` if registered before subnet activation
         assert_eq!(
@@ -828,7 +936,7 @@ pub fn insert_subnet_node(
     hotkey_n: u32,
     peer_n: u32,
     class: SubnetNodeClass,
-    start_epoch: u32
+    start_epoch: u32,
 ) {
     TotalSubnetNodeUids::<Test>::mutate(subnet_id, |n: &mut u32| *n += 1);
     let subnet_node_id = TotalSubnetNodeUids::<Test>::get(subnet_id);
@@ -877,15 +985,18 @@ pub fn insert_subnet_node(
     let subnet_node: SubnetNode<<Test as frame_system::Config>::AccountId> = SubnetNode {
         id: subnet_node_id,
         hotkey: hotkey.clone(),
-        peer_id: peer_id.clone(),
-        bootnode_peer_id: bootnode_peer_id.clone(),
-        client_peer_id: client_peer_id.clone(),
-        bootnode: Some(BoundedVec::new()),
+        peer_info: PeerInfo {
+            peer_id: peer_id.clone(),
+            multiaddr: None,
+        },
+        bootnode_peer_info: None,
+        client_peer_info: None,
         classification: classification,
         delegate_reward_rate: 0,
         last_delegate_reward_rate_update: 0,
         unique: None,
         non_unique: None,
+        delegate_account: None,
     };
 
     TotalSubnetNodes::<Test>::mutate(subnet_id, |n: &mut u32| *n += 1);
@@ -929,6 +1040,8 @@ pub fn build_registered_subnet_nodes(
 ) {
     let alice = get_alice();
 
+    let subnet_id_key_offset = get_subnet_id_key_offset(subnet_id);
+
     let epoch_length = EpochLength::get();
     let block_number = System::block_number();
     let epoch = block_number.saturating_div(epoch_length);
@@ -950,12 +1063,13 @@ pub fn build_registered_subnet_nodes(
     let subnet_epoch = Network::get_current_subnet_epoch_as_u32(subnet_id);
     for n in start..end {
         let _n = n + 1;
-        let coldkey = get_coldkey(subnet_id, max_subnet_nodes, _n);
-        let hotkey = get_hotkey(subnet_id, max_subnet_nodes, max_subnets, _n);
-        let peer_id = get_peer_id(subnet_id, max_subnet_nodes, max_subnets, _n);
+        let coldkey = get_coldkey(subnet_id_key_offset, max_subnet_nodes, _n);
+        let hotkey = get_hotkey(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
+        let peer_id = get_peer_id(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
         let bootnode_peer_id =
-            get_bootnode_peer_id(subnet_id, max_subnet_nodes, max_subnets, _n);
-        let client_peer_id = get_client_peer_id(subnet_id, max_subnet_nodes, max_subnets, _n);
+            get_bootnode_peer_id(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
+        let client_peer_id =
+            get_client_peer_id(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
         let alice = get_alice();
         assert_ok!(Balances::transfer(
             &alice, // alice
@@ -969,10 +1083,7 @@ pub fn build_registered_subnet_nodes(
 
         amount_staked += amount;
 
-        let bootnode: Option<BoundedVec<u8, DefaultMaxVectorLength>> = {
-            let bytes: Vec<u8> = format!("bootnode-{}-{}", subnet_id, _n).into();
-            Some(bytes.try_into().expect("bootnode too long"))
-        };
+        let multiaddr = get_multiaddr(Some(subnet_id), Some(_n), None);
         let unique: Option<BoundedVec<u8, DefaultMaxVectorLength>> = {
             let bytes: Vec<u8> = format!("unique-{}-{}", subnet_id, _n).into();
             Some(bytes.try_into().expect("unique too long"))
@@ -987,14 +1098,23 @@ pub fn build_registered_subnet_nodes(
             RuntimeOrigin::signed(coldkey.clone()),
             subnet_id,
             hotkey.clone(),
-            peer_id.clone(),
-            bootnode_peer_id.clone(),
-            client_peer_id.clone(),
-            bootnode,
+            PeerInfo {
+                peer_id: peer_id.clone(),
+                multiaddr,
+            },
+            Some(PeerInfo {
+                peer_id: bootnode_peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), Some(1)),
+            }),
+            Some(PeerInfo {
+                peer_id: client_peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), Some(2)),
+            }),
             0,
             amount,
             unique,
             non_unique,
+            None,
             u128::MAX
         ));
         let hotkey_subnet_node_id =
@@ -1012,11 +1132,9 @@ pub fn build_registered_subnet_nodes(
         let key_owner = HotkeyOwner::<Test>::get(subnet_node_data.hotkey.clone());
         assert_eq!(key_owner, coldkey.clone());
 
-        assert_eq!(subnet_node_data.peer_id, peer_id.clone());
+        assert_eq!(subnet_node_data.peer_info.peer_id, peer_id.clone());
 
         // --- Is ``Validator`` if registered before subnet activation
-        log::error!("node_class {:?}", subnet_node_data.classification);
-        log::error!("subnet_epoch {:?}", subnet_epoch);
         assert_eq!(
             subnet_node_data.classification.node_class,
             SubnetNodeClass::Registered
@@ -1139,12 +1257,21 @@ pub fn build_registered_subnet_and_subnet_nodes(
             RuntimeOrigin::signed(coldkey.clone()),
             subnet_id,
             hotkey.clone(),
-            peer_id.clone(),
-            bootnode_peer_id,
-            client_peer_id,
-            None,
+            PeerInfo {
+                peer_id: peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), None),
+            },
+            Some(PeerInfo {
+                peer_id: bootnode_peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), Some(1)),
+            }),
+            Some(PeerInfo {
+                peer_id: client_peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), Some(2)),
+            }),
             0,
             amount,
+            None,
             None,
             None,
             u128::MAX
@@ -1170,7 +1297,7 @@ pub fn build_registered_subnet_and_subnet_nodes(
         let key_owner = HotkeyOwner::<Test>::get(subnet_node_data.hotkey.clone());
         assert_eq!(key_owner, coldkey.clone());
 
-        assert_eq!(subnet_node_data.peer_id, peer_id.clone());
+        assert_eq!(subnet_node_data.peer_info.peer_id, peer_id.clone());
 
         // --- Is ``Validator`` if registered before subnet activation
         assert_eq!(
@@ -1267,12 +1394,21 @@ pub fn build_registered_nodes_in_queue(
             RuntimeOrigin::signed(coldkey.clone()),
             subnet_id,
             hotkey.clone(),
-            peer_id.clone(),
-            bootnode_peer_id,
-            client_peer_id,
-            None,
+            PeerInfo {
+                peer_id: peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), None),
+            },
+            Some(PeerInfo {
+                peer_id: bootnode_peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), Some(1)),
+            }),
+            Some(PeerInfo {
+                peer_id: client_peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), Some(2)),
+            }),
             0,
             amount,
+            None,
             None,
             None,
             u128::MAX
@@ -1298,7 +1434,7 @@ pub fn build_registered_nodes_in_queue(
         let key_owner = HotkeyOwner::<Test>::get(subnet_node_data.hotkey.clone());
         assert_eq!(key_owner, coldkey.clone());
 
-        assert_eq!(subnet_node_data.peer_id, peer_id.clone());
+        assert_eq!(subnet_node_data.peer_info.peer_id, peer_id.clone());
 
         // --- Is ``Registered`` if registered before subnet activation
         assert_eq!(
@@ -1421,12 +1557,21 @@ pub fn build_activated_subnet_with_overwatch_nodes(
             RuntimeOrigin::signed(coldkey.clone()),
             subnet_id,
             hotkey.clone(),
-            peer_id.clone(),
-            bootnode_peer_id.clone(),
-            client_peer_id.clone(),
-            None,
+            PeerInfo {
+                peer_id: peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), None),
+            },
+            Some(PeerInfo {
+                peer_id: bootnode_peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), Some(1)),
+            }),
+            Some(PeerInfo {
+                peer_id: client_peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), Some(2)),
+            }),
             0,
             amount,
+            None,
             None,
             None,
             u128::MAX
@@ -1453,7 +1598,7 @@ pub fn build_activated_subnet_with_overwatch_nodes(
         let key_owner = HotkeyOwner::<Test>::get(subnet_node_data.hotkey.clone());
         assert_eq!(key_owner, coldkey.clone());
 
-        assert_eq!(subnet_node_data.peer_id, peer_id.clone());
+        assert_eq!(subnet_node_data.peer_info.peer_id, peer_id.clone());
 
         // --- Is ``Validator`` if registered before subnet activation
         assert_eq!(
@@ -1506,12 +1651,21 @@ pub fn build_activated_subnet_with_overwatch_nodes(
             RuntimeOrigin::signed(coldkey.clone()),
             subnet_id,
             hotkey.clone(),
-            peer_id.clone(),
-            bootnode_peer_id.clone(),
-            client_peer_id.clone(),
-            None,
+            PeerInfo {
+                peer_id: peer_id.clone(),
+                multiaddr: Some(get_multiaddr(Some(subnet_id), Some(_n), None).unwrap()),
+            },
+            Some(PeerInfo {
+                peer_id: bootnode_peer_id.clone(),
+                multiaddr: Some(get_multiaddr(Some(subnet_id), Some(_n), None).unwrap()),
+            }),
+            Some(PeerInfo {
+                peer_id: client_peer_id.clone(),
+                multiaddr: Some(get_multiaddr(Some(subnet_id), Some(_n), None).unwrap()),
+            }),
             0,
             amount,
+            None,
             None,
             None,
             u128::MAX
@@ -1536,6 +1690,17 @@ pub fn build_activated_subnet_with_overwatch_nodes(
         let hotkey_subnet_node_id =
             HotkeySubnetNodeId::<Test>::get(subnet_id, hotkey.clone()).unwrap();
 
+        let peer_id_subnet_node_id = PeerIdSubnetNodeId::<Test>::get(subnet_id, peer_id.clone());
+        assert_eq!(peer_id_subnet_node_id, hotkey_subnet_node_id);
+
+        let bootnode_peer_id_subnet_node_id =
+            BootnodePeerIdSubnetNodeId::<Test>::get(subnet_id, bootnode_peer_id.clone());
+        assert_eq!(bootnode_peer_id_subnet_node_id, hotkey_subnet_node_id);
+
+        let client_peer_id_subnet_node_id =
+            ClientPeerIdSubnetNodeId::<Test>::get(subnet_id, client_peer_id.clone());
+        assert_eq!(client_peer_id_subnet_node_id, hotkey_subnet_node_id);
+
         let subnet_node_id_hotkey =
             SubnetNodeIdHotkey::<Test>::get(subnet_id, hotkey_subnet_node_id).unwrap();
         assert_eq!(subnet_node_id_hotkey, hotkey.clone());
@@ -1553,7 +1718,7 @@ pub fn build_activated_subnet_with_overwatch_nodes(
         let key_owner = HotkeyOwner::<Test>::get(subnet_node_data.hotkey.clone());
         assert_eq!(key_owner, coldkey.clone());
 
-        assert_eq!(subnet_node_data.peer_id, peer_id.clone());
+        assert_eq!(subnet_node_data.peer_info.peer_id, peer_id.clone());
 
         // --- Is ``Validator`` if registered before subnet activation
         assert_eq!(
@@ -1777,12 +1942,21 @@ pub fn build_activated_subnet_with_overwatch_nodes_v2(
                 RuntimeOrigin::signed(coldkey.clone()),
                 subnet_id,
                 hotkey.clone(),
-                peer_id.clone(),
-                bootnode_peer_id.clone(),
-                client_peer_id.clone(),
-                None,
+                PeerInfo {
+                    peer_id: peer_id.clone(),
+                    multiaddr: get_multiaddr(Some(subnet_id), Some(_n), None),
+                },
+                Some(PeerInfo {
+                    peer_id: bootnode_peer_id.clone(),
+                    multiaddr: get_multiaddr(Some(subnet_id), Some(_n), Some(1)),
+                }),
+                Some(PeerInfo {
+                    peer_id: client_peer_id.clone(),
+                    multiaddr: get_multiaddr(Some(subnet_id), Some(_n), Some(2)),
+                }),
                 0,
                 amount,
+                None,
                 None,
                 None,
                 u128::MAX
@@ -1808,7 +1982,7 @@ pub fn build_activated_subnet_with_overwatch_nodes_v2(
             let key_owner = HotkeyOwner::<Test>::get(subnet_node_data.hotkey.clone());
             assert_eq!(key_owner, coldkey.clone());
 
-            assert_eq!(subnet_node_data.peer_id, peer_id.clone());
+            assert_eq!(subnet_node_data.peer_info.peer_id, peer_id.clone());
 
             // --- Is ``Validator`` if registered before subnet activation
             assert_eq!(
@@ -2051,12 +2225,21 @@ pub fn build_activated_subnet_with_delegator_rewards(
             RuntimeOrigin::signed(coldkey.clone()),
             subnet_id,
             hotkey.clone(),
-            peer_id.clone(),
-            bootnode_peer_id.clone(),
-            client_peer_id.clone(),
-            None,
+            PeerInfo {
+                peer_id: peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), None),
+            },
+            Some(PeerInfo {
+                peer_id: bootnode_peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), Some(1)),
+            }),
+            Some(PeerInfo {
+                peer_id: client_peer_id.clone(),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(_n), Some(2)),
+            }),
             0,
             amount,
+            None,
             None,
             None,
             u128::MAX
@@ -2077,7 +2260,7 @@ pub fn build_activated_subnet_with_delegator_rewards(
         let key_owner = HotkeyOwner::<Test>::get(subnet_node_data.hotkey.clone());
         assert_eq!(key_owner, coldkey.clone());
 
-        assert_eq!(subnet_node_data.peer_id, peer_id.clone());
+        assert_eq!(subnet_node_data.peer_info.peer_id, peer_id.clone());
 
         // --- Is ``Validator`` if registered before subnet activation
         assert_eq!(
@@ -2295,8 +2478,10 @@ pub fn default_registration_subnet_data(
         max_stake: NetworkMaxStakeBalance::<Test>::get(),
         delegate_stake_percentage: 100000000000000000, // 10%
         initial_coldkeys: get_initial_coldkeys(subnets, max_subnet_nodes, start, end),
-        key_types: BTreeSet::from([KeyType::Rsa]),
-        bootnodes: BTreeSet::from([BoundedVec::new()]),
+        bootnodes: BTreeMap::from([(
+            peer(0),
+            get_multiaddr(None, None, None).expect("valid multiaddr"),
+        )]),
     };
     add_subnet_data
 }
@@ -2329,8 +2514,10 @@ pub fn default_registration_subnet_data_with_onodes(
             end,
             overwatch_count,
         ),
-        key_types: BTreeSet::from([KeyType::Rsa]),
-        bootnodes: BTreeSet::from([BoundedVec::new()]),
+        bootnodes: BTreeMap::from([(
+            peer(0),
+            get_multiaddr(None, None, None).expect("valid multiaddr"),
+        )]),
     };
     add_subnet_data
 }
@@ -2809,6 +2996,7 @@ pub fn manual_insert_subnet_node(
     peer_n: u32,
     class: SubnetNodeClass,
     start_epoch: u32,
+    delegate_account: Option<DelegateAccount<AccountId>>,
 ) {
     SubnetNodesData::<Test>::insert(
         subnet_id,
@@ -2816,20 +3004,28 @@ pub fn manual_insert_subnet_node(
         SubnetNode {
             id: node_id,
             hotkey: account(hotkey_n),
-            peer_id: peer(peer_n),
-            bootnode_peer_id: peer(peer_n),
-            client_peer_id: peer(peer_n),
-            bootnode: None,
+            peer_info: PeerInfo {
+                peer_id: peer(peer_n),
+                multiaddr: get_multiaddr(Some(subnet_id), Some(node_id), None),
+            },
+            bootnode_peer_info: None,
+            client_peer_info: None,
             delegate_reward_rate: 0,
             last_delegate_reward_rate_update: 0,
             classification: SubnetNodeClassification {
                 node_class: class,
-                start_epoch: 0,
+                start_epoch: start_epoch,
             },
             unique: Some(BoundedVec::new()),
             non_unique: Some(BoundedVec::new()),
+            delegate_account: delegate_account,
         },
     );
+    HotkeyOwner::<Test>::insert(account(hotkey_n), account(coldkey_n));
+    HotkeySubnetNodeId::<Test>::insert(subnet_id, account(hotkey_n), node_id);
+    SubnetNodeIdHotkey::<Test>::insert(subnet_id, node_id, account(hotkey_n));
+    PeerIdSubnetNodeId::<Test>::insert(subnet_id, peer(peer_n), node_id);
+    BootnodePeerIdSubnetNodeId::<Test>::insert(subnet_id, peer(peer_n), node_id);
 }
 
 // Helper to set registration epoch
@@ -2887,9 +3083,10 @@ pub fn run_subnet_consensus_step(
     ));
 
     let mut attested_nodes = 0;
+    let subnet_id_key_offset = get_subnet_id_key_offset(subnet_id);
     for n in 0..total_subnet_nodes {
         let _n = n + 1;
-        let hotkey = get_hotkey(subnet_id, max_subnet_nodes, max_subnets, _n);
+        let hotkey = get_hotkey(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
         if hotkey.clone() == validator.clone() {
             attested_nodes += 1;
             continue;
@@ -2919,7 +3116,7 @@ pub fn run_subnet_consensus_step(
 
     for n in 0..total_subnet_nodes {
         let _n = n + 1;
-        let hotkey = get_hotkey(subnet_id, max_subnet_nodes, max_subnets, _n);
+        let hotkey = get_hotkey(subnet_id_key_offset, max_subnet_nodes, max_subnets, _n);
 
         if let Some(subnet_node_id) = HotkeySubnetNodeId::<Test>::get(subnet_id, &hotkey) {
             let is_validator = match SubnetNodesData::<Test>::try_get(subnet_id, subnet_node_id) {
@@ -2973,6 +3170,7 @@ pub fn make_overwatch_qualified(coldkey_n: u32) {
             hotkey_n,  // peer
             SubnetNodeClass::Validator,
             0,
+            None,
         );
         node_ids.insert(1);
         subnet_nodes.insert(_n, node_ids);
@@ -3062,12 +3260,21 @@ pub fn make_overwatch_qualified_sim(coldkey_n: u32) {
             RuntimeOrigin::signed(coldkey.clone()),
             subnet_id,
             hotkey.clone(),
-            peer_id.clone(),
-            bootnode_peer_id.clone(),
-            client_peer_id.clone(),
-            None,
+            PeerInfo {
+                peer_id: peer_id.clone(),
+                multiaddr: None,
+            },
+            Some(PeerInfo {
+                peer_id: bootnode_peer_id.clone(),
+                multiaddr: None,
+            }),
+            Some(PeerInfo {
+                peer_id: client_peer_id.clone(),
+                multiaddr: None,
+            }),
             0,
             amount,
+            None,
             None,
             None,
             u128::MAX

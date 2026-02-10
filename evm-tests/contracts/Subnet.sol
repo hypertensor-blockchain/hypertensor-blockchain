@@ -3,9 +3,14 @@
 pragma solidity ^0.8.0;
 
 interface Subnet {
-    struct InitialColdkeys {
+    struct InitialColdkey {
         address coldkey;
         uint256 count;
+    }
+
+    struct Bootnode {
+        string peerId;
+        bytes multiaddr;
     }
 
     function registerSubnet(
@@ -17,22 +22,31 @@ interface Subnet {
         uint256 minStake,
         uint256 maxStake,
         uint256 delegateStakePercentage,
-        InitialColdkeys[] calldata initialColdkeys,
-        uint256[] memory keyTypes,
-        string[] memory bootnodes
+        InitialColdkey[] calldata initialColdkeys,
+        Bootnode[] calldata bootnodes
     ) external payable;
+
+    struct PeerInfo {
+        string peerId;
+        bytes multiaddr;
+    }
+
+    struct DelegateAccount {
+        address accountId;
+        uint256 rate;
+    }
 
     function registerSubnetNode(
         uint256 subnetId,
         address hotkey,
-        string memory peerId,
-        string memory bootnodePeerId,
-        string memory clientPeerId,
-        string memory bootnode,
+        PeerInfo calldata peerInfo,
+        PeerInfo calldata bootnodePeerInfo,
+        PeerInfo calldata clientPeerInfo,
         uint256 delegateRewardRate,
         uint256 stakeToBeAdded,
         string memory unique,
         string memory nonUnique,
+        DelegateAccount calldata delegateAccount,
         uint256 maxBurnAmount
     ) external payable;
 
@@ -70,28 +84,22 @@ interface Subnet {
 
     function updateHotkey(address oldHotkey, address newHotkey) external;
 
-    function updatePeerId(
+    function updatePeerInfo(
         uint256 subnetId,
         uint256 subnetNodeId,
-        string memory newPeerId
+        PeerInfo calldata peerInfo
     ) external;
 
-    function updateBootnode(
+    function updateBootnodePeerInfo(
         uint256 subnetId,
         uint256 subnetNodeId,
-        string memory newBootnode
+        PeerInfo calldata peerInfo
     ) external;
 
-    function updateBootnodePeerId(
+    function updateClientPeerInfo(
         uint256 subnetId,
         uint256 subnetNodeId,
-        string memory newPeerId
-    ) external;
-
-    function updateClientPeerId(
-        uint256 subnetId,
-        uint256 subnetNodeId,
-        string memory newPeerId
+        PeerInfo calldata peerInfo
     ) external;
 
     function registerOrUpdateIdentity(
@@ -111,6 +119,8 @@ interface Subnet {
     function removeIdentity() external;
 
     function ownerPauseSubnet(uint256 subnetId) external;
+
+    function ownerUnpauseSubnet(uint256 subnetId) external;
 
     function ownerSetEmergencyValidatorSet(
         uint256 subnetId,
@@ -151,17 +161,12 @@ interface Subnet {
 
     function ownerAddOrUpdateInitialColdkeys(
         uint256 subnetId,
-        InitialColdkeys[] calldata initialColdkeys
+        InitialColdkey[] calldata initialColdkeys
     ) external;
 
     function ownerRemoveInitialColdkeys(
         uint256 subnetId,
         address[] memory coldkeys
-    ) external;
-
-    function ownerUpdateKeyTypes(
-        uint256 subnetId,
-        uint256[] memory keyTypes
     ) external;
 
     function ownerUpdateDelegateStakePercentage(
@@ -261,7 +266,7 @@ interface Subnet {
 
     function updateBootnodes(
         uint256 subnetId,
-        string[] memory add,
+        Bootnode[] calldata add,
         string[] memory remove
     ) external;
 
@@ -301,11 +306,7 @@ interface Subnet {
 
     function getInitialColdkeys(
         uint256 subnetId
-    ) external view returns (InitialColdkeys[] memory);
-
-    function getKeyTypes(
-        uint256 subnetId
-    ) external view returns (uint256[] memory);
+    ) external view returns (InitialColdkey[] memory);
 
     function getMinStake(uint256 subnetId) external view returns (uint256);
 

@@ -561,7 +561,7 @@ impl<T: Config> Pallet<T> {
         );
 
         ensure!(
-            !Self::is_subnet_active(subnet_id).unwrap_or(false),
+            Self::is_subnet_registered(subnet_id).unwrap_or(false),
             Error::<T>::SubnetMustBeRegistering
         );
 
@@ -597,7 +597,7 @@ impl<T: Config> Pallet<T> {
         );
 
         ensure!(
-            !Self::is_subnet_active(subnet_id).unwrap_or(false),
+            Self::is_subnet_registered(subnet_id).unwrap_or(false),
             Error::<T>::SubnetMustBeRegistering
         );
 
@@ -619,29 +619,6 @@ impl<T: Config> Pallet<T> {
             subnet_id: subnet_id,
             owner: coldkey,
             coldkeys: coldkeys,
-        });
-
-        Ok(())
-    }
-
-    pub fn do_owner_update_key_types(
-        origin: T::RuntimeOrigin,
-        subnet_id: u32,
-        value: BTreeSet<KeyType>,
-    ) -> DispatchResult {
-        let coldkey: T::AccountId = ensure_signed(origin)?;
-
-        ensure!(
-            Self::is_subnet_owner(&coldkey, subnet_id).unwrap_or(false),
-            Error::<T>::NotSubnetOwner
-        );
-
-        SubnetKeyTypes::<T>::insert(subnet_id, &value);
-
-        Self::deposit_event(Event::SubnetKeyTypesUpdate {
-            subnet_id: subnet_id,
-            owner: coldkey,
-            value: value,
         });
 
         Ok(())
@@ -939,9 +916,8 @@ impl<T: Config> Pallet<T> {
             Error::<T>::NotSubnetOwner
         );
 
-        let max_registrations = MaxRegisteredNodes::<T>::get(subnet_id);
         ensure!(
-            value <= max_registrations && value > 0,
+            value <= MaxRegisteredNodes::<T>::get(subnet_id) && value > 0,
             Error::<T>::InvalidTargetNodeRegistrationsPerEpoch
         );
 
@@ -1281,7 +1257,7 @@ impl<T: Config> Pallet<T> {
         ensure!(
             value >= MinNodeReputationFactor::<T>::get()
                 && value <= MaxNodeReputationFactor::<T>::get(),
-            Error::<T>::InvalidNonValidatorAbsentSubnetNodeReputationFactor
+            Error::<T>::InvalidNonValidatorAbsentDecreaseReputationFactor
         );
 
         ensure!(
@@ -1289,9 +1265,9 @@ impl<T: Config> Pallet<T> {
             Error::<T>::EmergencyValidatorsSet
         );
 
-        ValidatorAbsentSubnetNodeReputationFactor::<T>::insert(subnet_id, value);
+        ValidatorAbsentDecreaseReputationFactor::<T>::insert(subnet_id, value);
 
-        Self::deposit_event(Event::ValidatorAbsentSubnetNodeReputationFactorUpdate {
+        Self::deposit_event(Event::ValidatorAbsentDecreaseReputationFactorUpdate {
             subnet_id: subnet_id,
             owner: coldkey,
             value,

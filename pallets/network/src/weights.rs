@@ -86,10 +86,10 @@ pub trait WeightInfo {
 	fn update_non_unique() -> Weight;
 	fn update_coldkey() -> Weight;
 	fn update_hotkey() -> Weight;
-	fn update_peer_id() -> Weight;
+	fn update_peer_info() -> Weight;
 	fn update_bootnode() -> Weight;
-	fn update_bootnode_peer_id() -> Weight;
-	fn update_client_peer_id() -> Weight;
+	fn update_bootnode_peer_info() -> Weight;
+	fn update_client_peer_info() -> Weight;
 	fn register_overwatch_node() -> Weight;
 	fn remove_overwatch_node() -> Weight;
 	fn anyone_remove_overwatch_node() -> Weight;
@@ -489,8 +489,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `Network::FriendlyUidSubnetId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ValidatorNonConsensusSubnetNodeReputationFactor` (r:0 w:1)
 	/// Proof: `Network::ValidatorNonConsensusSubnetNodeReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `Network::ValidatorAbsentSubnetNodeReputationFactor` (r:0 w:1)
-	/// Proof: `Network::ValidatorAbsentSubnetNodeReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	/// Storage: `Network::ValidatorAbsentDecreaseReputationFactor` (r:0 w:1)
+	/// Proof: `Network::ValidatorAbsentDecreaseReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::TotalSubnetNodeUids` (r:0 w:1)
 	/// Proof: `Network::TotalSubnetNodeUids` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ChurnLimitMultiplier` (r:0 w:1)
@@ -2020,7 +2020,7 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	fn update_peer_id() -> Weight {
+	fn update_peer_info() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `2033`
 		//  Estimated: `5498`
@@ -2035,8 +2035,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `Network::SubnetNodeIdHotkey` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::HotkeyOwner` (r:1 w:0)
 	/// Proof: `Network::HotkeyOwner` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `Network::BootnodeSubnetNodeId` (r:1 w:1)
-	/// Proof: `Network::BootnodeSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	/// Storage: `Network::MultiaddrSubnetNodeId` (r:1 w:1)
+	/// Proof: `Network::MultiaddrSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::SubnetNodesData` (r:1 w:1)
 	/// Proof: `Network::SubnetNodesData` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `System::Number` (r:1 w:0)
@@ -2080,7 +2080,7 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	fn update_bootnode_peer_id() -> Weight {
+	fn update_bootnode_peer_info() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `2033`
 		//  Estimated: `5498`
@@ -2113,7 +2113,7 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	fn update_client_peer_id() -> Weight {
+	fn update_client_peer_info() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `2033`
 		//  Estimated: `5498`
@@ -2551,8 +2551,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `Network::FriendlyUidSubnetId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ValidatorNonConsensusSubnetNodeReputationFactor` (r:0 w:1)
 	/// Proof: `Network::ValidatorNonConsensusSubnetNodeReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `Network::ValidatorAbsentSubnetNodeReputationFactor` (r:0 w:1)
-	/// Proof: `Network::ValidatorAbsentSubnetNodeReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	/// Storage: `Network::ValidatorAbsentDecreaseReputationFactor` (r:0 w:1)
+	/// Proof: `Network::ValidatorAbsentDecreaseReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::TotalSubnetNodeUids` (r:0 w:1)
 	/// Proof: `Network::TotalSubnetNodeUids` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ChurnLimitMultiplier` (r:0 w:1)
@@ -4073,8 +4073,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `Network::FriendlyUidSubnetId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ValidatorNonConsensusSubnetNodeReputationFactor` (r:0 w:1)
 	/// Proof: `Network::ValidatorNonConsensusSubnetNodeReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `Network::ValidatorAbsentSubnetNodeReputationFactor` (r:0 w:1)
-	/// Proof: `Network::ValidatorAbsentSubnetNodeReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	/// Storage: `Network::ValidatorAbsentDecreaseReputationFactor` (r:0 w:1)
+	/// Proof: `Network::ValidatorAbsentDecreaseReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::TotalSubnetNodeUids` (r:0 w:1)
 	/// Proof: `Network::TotalSubnetNodeUids` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ChurnLimitMultiplier` (r:0 w:1)
@@ -4193,8 +4193,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `Network::SubnetNodeReputation` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::SubnetNodeIdHotkey` (r:0 w:1)
 	/// Proof: `Network::SubnetNodeIdHotkey` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `Network::BootnodeSubnetNodeId` (r:0 w:1)
-	/// Proof: `Network::BootnodeSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	/// Storage: `Network::MultiaddrSubnetNodeId` (r:0 w:1)
+	/// Proof: `Network::MultiaddrSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::NodeSlotIndex` (r:0 w:2)
 	/// Proof: `Network::NodeSlotIndex` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ClientPeerIdSubnetNodeId` (r:0 w:1)
@@ -4264,8 +4264,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `Network::SubnetNodeReputation` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::SubnetNodeIdHotkey` (r:0 w:1)
 	/// Proof: `Network::SubnetNodeIdHotkey` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `Network::BootnodeSubnetNodeId` (r:0 w:1)
-	/// Proof: `Network::BootnodeSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	/// Storage: `Network::MultiaddrSubnetNodeId` (r:0 w:1)
+	/// Proof: `Network::MultiaddrSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::NodeSlotIndex` (r:0 w:2)
 	/// Proof: `Network::NodeSlotIndex` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ClientPeerIdSubnetNodeId` (r:0 w:1)
@@ -4329,8 +4329,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `Network::SubnetNodeReputation` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::SubnetNodeIdHotkey` (r:0 w:1)
 	/// Proof: `Network::SubnetNodeIdHotkey` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `Network::BootnodeSubnetNodeId` (r:0 w:1)
-	/// Proof: `Network::BootnodeSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	/// Storage: `Network::MultiaddrSubnetNodeId` (r:0 w:1)
+	/// Proof: `Network::MultiaddrSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ClientPeerIdSubnetNodeId` (r:0 w:1)
 	/// Proof: `Network::ClientPeerIdSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::BootnodePeerIdSubnetNodeId` (r:0 w:1)
@@ -4577,8 +4577,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `Network::FriendlyUidSubnetId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ValidatorNonConsensusSubnetNodeReputationFactor` (r:0 w:16)
 	/// Proof: `Network::ValidatorNonConsensusSubnetNodeReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `Network::ValidatorAbsentSubnetNodeReputationFactor` (r:0 w:16)
-	/// Proof: `Network::ValidatorAbsentSubnetNodeReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	/// Storage: `Network::ValidatorAbsentDecreaseReputationFactor` (r:0 w:16)
+	/// Proof: `Network::ValidatorAbsentDecreaseReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::TotalSubnetNodeUids` (r:0 w:16)
 	/// Proof: `Network::TotalSubnetNodeUids` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ChurnLimitMultiplier` (r:0 w:16)
@@ -5156,8 +5156,8 @@ impl WeightInfo for () {
 	/// Proof: `Network::FriendlyUidSubnetId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ValidatorNonConsensusSubnetNodeReputationFactor` (r:0 w:1)
 	/// Proof: `Network::ValidatorNonConsensusSubnetNodeReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `Network::ValidatorAbsentSubnetNodeReputationFactor` (r:0 w:1)
-	/// Proof: `Network::ValidatorAbsentSubnetNodeReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	/// Storage: `Network::ValidatorAbsentDecreaseReputationFactor` (r:0 w:1)
+	/// Proof: `Network::ValidatorAbsentDecreaseReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::TotalSubnetNodeUids` (r:0 w:1)
 	/// Proof: `Network::TotalSubnetNodeUids` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ChurnLimitMultiplier` (r:0 w:1)
@@ -6687,7 +6687,7 @@ impl WeightInfo for () {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	fn update_peer_id() -> Weight {
+	fn update_peer_info() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `2033`
 		//  Estimated: `5498`
@@ -6702,8 +6702,8 @@ impl WeightInfo for () {
 	/// Proof: `Network::SubnetNodeIdHotkey` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::HotkeyOwner` (r:1 w:0)
 	/// Proof: `Network::HotkeyOwner` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `Network::BootnodeSubnetNodeId` (r:1 w:1)
-	/// Proof: `Network::BootnodeSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	/// Storage: `Network::MultiaddrSubnetNodeId` (r:1 w:1)
+	/// Proof: `Network::MultiaddrSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::SubnetNodesData` (r:1 w:1)
 	/// Proof: `Network::SubnetNodesData` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `System::Number` (r:1 w:0)
@@ -6747,7 +6747,7 @@ impl WeightInfo for () {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	fn update_bootnode_peer_id() -> Weight {
+	fn update_bootnode_peer_info() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `2033`
 		//  Estimated: `5498`
@@ -6780,7 +6780,7 @@ impl WeightInfo for () {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	fn update_client_peer_id() -> Weight {
+	fn update_client_peer_info() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `2033`
 		//  Estimated: `5498`
@@ -7218,8 +7218,8 @@ impl WeightInfo for () {
 	/// Proof: `Network::FriendlyUidSubnetId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ValidatorNonConsensusSubnetNodeReputationFactor` (r:0 w:1)
 	/// Proof: `Network::ValidatorNonConsensusSubnetNodeReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `Network::ValidatorAbsentSubnetNodeReputationFactor` (r:0 w:1)
-	/// Proof: `Network::ValidatorAbsentSubnetNodeReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	/// Storage: `Network::ValidatorAbsentDecreaseReputationFactor` (r:0 w:1)
+	/// Proof: `Network::ValidatorAbsentDecreaseReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::TotalSubnetNodeUids` (r:0 w:1)
 	/// Proof: `Network::TotalSubnetNodeUids` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ChurnLimitMultiplier` (r:0 w:1)
@@ -8740,8 +8740,8 @@ impl WeightInfo for () {
 	/// Proof: `Network::FriendlyUidSubnetId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ValidatorNonConsensusSubnetNodeReputationFactor` (r:0 w:1)
 	/// Proof: `Network::ValidatorNonConsensusSubnetNodeReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `Network::ValidatorAbsentSubnetNodeReputationFactor` (r:0 w:1)
-	/// Proof: `Network::ValidatorAbsentSubnetNodeReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	/// Storage: `Network::ValidatorAbsentDecreaseReputationFactor` (r:0 w:1)
+	/// Proof: `Network::ValidatorAbsentDecreaseReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::TotalSubnetNodeUids` (r:0 w:1)
 	/// Proof: `Network::TotalSubnetNodeUids` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ChurnLimitMultiplier` (r:0 w:1)
@@ -8860,8 +8860,8 @@ impl WeightInfo for () {
 	/// Proof: `Network::SubnetNodeReputation` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::SubnetNodeIdHotkey` (r:0 w:1)
 	/// Proof: `Network::SubnetNodeIdHotkey` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `Network::BootnodeSubnetNodeId` (r:0 w:1)
-	/// Proof: `Network::BootnodeSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	/// Storage: `Network::MultiaddrSubnetNodeId` (r:0 w:1)
+	/// Proof: `Network::MultiaddrSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::NodeSlotIndex` (r:0 w:2)
 	/// Proof: `Network::NodeSlotIndex` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ClientPeerIdSubnetNodeId` (r:0 w:1)
@@ -8931,8 +8931,8 @@ impl WeightInfo for () {
 	/// Proof: `Network::SubnetNodeReputation` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::SubnetNodeIdHotkey` (r:0 w:1)
 	/// Proof: `Network::SubnetNodeIdHotkey` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `Network::BootnodeSubnetNodeId` (r:0 w:1)
-	/// Proof: `Network::BootnodeSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	/// Storage: `Network::MultiaddrSubnetNodeId` (r:0 w:1)
+	/// Proof: `Network::MultiaddrSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::NodeSlotIndex` (r:0 w:2)
 	/// Proof: `Network::NodeSlotIndex` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ClientPeerIdSubnetNodeId` (r:0 w:1)
@@ -8996,8 +8996,8 @@ impl WeightInfo for () {
 	/// Proof: `Network::SubnetNodeReputation` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::SubnetNodeIdHotkey` (r:0 w:1)
 	/// Proof: `Network::SubnetNodeIdHotkey` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `Network::BootnodeSubnetNodeId` (r:0 w:1)
-	/// Proof: `Network::BootnodeSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	/// Storage: `Network::MultiaddrSubnetNodeId` (r:0 w:1)
+	/// Proof: `Network::MultiaddrSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ClientPeerIdSubnetNodeId` (r:0 w:1)
 	/// Proof: `Network::ClientPeerIdSubnetNodeId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::BootnodePeerIdSubnetNodeId` (r:0 w:1)
@@ -9244,8 +9244,8 @@ impl WeightInfo for () {
 	/// Proof: `Network::FriendlyUidSubnetId` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ValidatorNonConsensusSubnetNodeReputationFactor` (r:0 w:16)
 	/// Proof: `Network::ValidatorNonConsensusSubnetNodeReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `Network::ValidatorAbsentSubnetNodeReputationFactor` (r:0 w:16)
-	/// Proof: `Network::ValidatorAbsentSubnetNodeReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	/// Storage: `Network::ValidatorAbsentDecreaseReputationFactor` (r:0 w:16)
+	/// Proof: `Network::ValidatorAbsentDecreaseReputationFactor` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::TotalSubnetNodeUids` (r:0 w:16)
 	/// Proof: `Network::TotalSubnetNodeUids` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `Network::ChurnLimitMultiplier` (r:0 w:16)

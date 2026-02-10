@@ -7,7 +7,8 @@ use frame_support::{
 use frame_system::RawOrigin;
 use pallet_evm::{AddressMapping, ExitError, PrecompileFailure, PrecompileHandle};
 use pallet_network::{
-    DefaultMaxSocialIdLength, DefaultMaxUrlLength, DefaultMaxVectorLength, KeyType,
+    DefaultMaxSocialIdLength, DefaultMaxUrlLength, DefaultMaxVectorLength, DelegateAccount,
+    PeerInfo,
 };
 use precompile_utils::{EvmResult, prelude::*};
 use sp_core::{H160, H256, OpaquePeerId, U256};
@@ -48,7 +49,7 @@ where
     <<R as frame_system::Config>::Lookup as StaticLookup>::Source: From<R::AccountId>,
 {
     #[precompile::public(
-        "registerSubnet(uint256,string,string,string,string,uint256,uint256,uint256,(address,uint256)[],uint256[],string[])"
+        "registerSubnet(uint256,string,string,string,string,uint256,uint256,uint256,(address,uint256)[],(string,bytes)[])"
     )]
     #[precompile::payable]
     fn register_subnet(
@@ -62,9 +63,13 @@ where
         max_stake: U256,
         delegate_stake_percentage: U256,
         initial_coldkeys: Vec<(Address, U256)>,
-        key_types: Vec<U256>,
-        bootnodes: Vec<BoundedString<ConstU32<1024>>>,
+        bootnodes: Vec<(BoundedString<ConstU32<64>>, UnboundedBytes)>,
     ) -> EvmResult<()> {
+        log::info!("register_subnet");
+        log::error!("register_subnet");
+        log::warn!("register_subnet");
+        log::debug!("register_subnet");
+        log::trace!("register_subnet");
         let origin = R::AddressMapping::into_account_id(handle.context().caller);
 
         let max_cost: u128 = max_cost.unique_saturated_into();
@@ -80,16 +85,13 @@ where
                 ))
             })
             .collect::<Result<_, _>>()?;
-        let key_types: BTreeSet<KeyType> = key_types
+        let bootnodes: BTreeMap<OpaquePeerId, BoundedVec<u8, DefaultMaxVectorLength>> = bootnodes
             .into_iter()
-            .map(|val| key_type_from_u256(val).ok_or_else(|| revert("Invalid KeyType value")))
-            .collect::<Result<_, _>>()?;
-        let bootnodes: BTreeSet<BoundedVec<u8, DefaultMaxVectorLength>> = bootnodes
-            .into_iter()
-            .map(|bootnode_string| {
-                let bootnode_bytes = bootnode_string.as_bytes();
-                BoundedVec::try_from(bootnode_bytes.to_vec())
-                    .map_err(|_| revert("Bootnode address too long"))
+            .map(|(peer_id, multiaddr_bytes)| {
+                let peer_id = OpaquePeerId(peer_id.as_bytes().to_vec());
+                let multiaddr = BoundedVec::try_from(multiaddr_bytes.as_bytes().to_vec())
+                    .map_err(|_| revert("Bootnode address too long"));
+                Ok::<_, PrecompileFailure>((peer_id, multiaddr?))
             })
             .collect::<Result<_, _>>()?;
 
@@ -102,7 +104,6 @@ where
             max_stake,
             delegate_stake_percentage,
             initial_coldkeys,
-            key_types,
             bootnodes,
         };
 
@@ -182,36 +183,88 @@ where
     }
 
     #[precompile::public(
-        "registerSubnetNode(uint256,address,string,string,string,string,uint256,uint256,string,string,uint256)"
+        "registerSubnetNode(uint256,address,(string,bytes),(string,bytes),(string,bytes),uint256,uint256,string,string,(address,uint256),uint256)"
     )]
     #[precompile::payable]
     fn register_subnet_node(
         handle: &mut impl PrecompileHandle,
         subnet_id: U256,
         hotkey: Address,
-        peer_id: BoundedString<ConstU32<64>>,
-        bootnode_peer_id: BoundedString<ConstU32<64>>,
-        client_peer_id: BoundedString<ConstU32<64>>,
-        bootnode: BoundedString<ConstU32<1024>>,
+        peer_info: (BoundedString<ConstU32<64>>, UnboundedBytes),
+        bootnode_peer_info: (BoundedString<ConstU32<64>>, UnboundedBytes),
+        client_peer_info: (BoundedString<ConstU32<64>>, UnboundedBytes),
         delegate_reward_rate: U256,
         stake_to_be_added: U256,
         unique: BoundedString<ConstU32<1024>>,
         non_unique: BoundedString<ConstU32<1024>>,
+        delegate_account: (Address, U256),
         max_burn_amount: U256,
     ) -> EvmResult<()> {
         let subnet_id = try_u256_to_u32(subnet_id)?;
         let hotkey = R::AddressMapping::into_account_id(hotkey.into());
-        let peer_id = OpaquePeerId(peer_id.as_bytes().to_vec());
-        let bootnode_peer_id = OpaquePeerId(bootnode_peer_id.as_bytes().to_vec());
-        let client_peer_id = OpaquePeerId(client_peer_id.as_bytes().to_vec());
+        let peer_multiaddr: Option<BoundedVec<u8, DefaultMaxVectorLength>> =
+            if peer_info.1.as_bytes().is_empty() {
+                None
+            } else {
+                Some(
+                    BoundedVec::try_from(peer_info.1.as_bytes().to_vec())
+                        .map_err(|_| revert("Peer multiaddr too long"))?,
+                )
+            };
+        let peer_info = PeerInfo {
+            peer_id: OpaquePeerId(peer_info.0.as_bytes().to_vec()),
+            multiaddr: peer_multiaddr,
+        };
+        let bootnode_peer_info = if !bootnode_peer_info.0.as_bytes().is_empty() {
+            let bootnode_peer_multiaddr: Option<BoundedVec<u8, DefaultMaxVectorLength>> =
+                if bootnode_peer_info.1.as_bytes().is_empty() {
+                    None
+                } else {
+                    Some(
+                        BoundedVec::try_from(bootnode_peer_info.1.as_bytes().to_vec())
+                            .map_err(|_| revert("Bootnode multiaddr too long"))?,
+                    )
+                };
+            Some(PeerInfo {
+                peer_id: OpaquePeerId(bootnode_peer_info.0.as_bytes().to_vec()),
+                multiaddr: bootnode_peer_multiaddr,
+            })
+        } else {
+            None
+        };
+        let client_peer_info = if !client_peer_info.0.as_bytes().is_empty() {
+            let client_peer_multiaddr: Option<BoundedVec<u8, DefaultMaxVectorLength>> =
+                if client_peer_info.1.as_bytes().is_empty() {
+                    None
+                } else {
+                    Some(
+                        BoundedVec::try_from(client_peer_info.1.as_bytes().to_vec())
+                            .map_err(|_| revert("Client multiaddr too long"))?,
+                    )
+                };
+            Some(PeerInfo {
+                peer_id: OpaquePeerId(client_peer_info.0.as_bytes().to_vec()),
+                multiaddr: client_peer_multiaddr,
+            })
+        } else {
+            None
+        };
+
         let delegate_reward_rate: u128 = delegate_reward_rate.unique_saturated_into();
         let stake_to_be_added: u128 = stake_to_be_added.unique_saturated_into();
         let unique: Option<BoundedVec<u8, DefaultMaxVectorLength>> =
             bounded_string_to_option_bounded_vec::<1024, DefaultMaxVectorLength>(&unique)?;
-        let bootnode: Option<BoundedVec<u8, DefaultMaxVectorLength>> =
-            bounded_string_to_option_bounded_vec::<1024, DefaultMaxVectorLength>(&bootnode)?;
         let non_unique: Option<BoundedVec<u8, DefaultMaxVectorLength>> =
             bounded_string_to_option_bounded_vec::<1024, DefaultMaxVectorLength>(&non_unique)?;
+        let delegate_account_rate = delegate_account.1.unique_saturated_into();
+        let delegate_account = if delegate_account_rate > 0 {
+            Some(DelegateAccount {
+                account_id: R::AddressMapping::into_account_id(delegate_account.0.into()),
+                rate: delegate_account_rate,
+            })
+        } else {
+            None
+        };
         let max_burn_amount: u128 = max_burn_amount.unique_saturated_into();
 
         let origin = R::AddressMapping::into_account_id(handle.context().caller);
@@ -219,15 +272,15 @@ where
         let call = pallet_network::Call::<R>::register_subnet_node {
             subnet_id,
             hotkey,
-            peer_id,
-            bootnode_peer_id,
-            client_peer_id,
-            bootnode,
+            peer_info,
+            bootnode_peer_info,
+            client_peer_info,
             delegate_reward_rate,
             stake_to_be_added,
             unique,
             non_unique,
             max_burn_amount,
+            delegate_account: None,
         };
 
         RuntimeHelper::<R>::try_dispatch(
@@ -407,23 +460,35 @@ where
         Ok(())
     }
 
-    #[precompile::public("updatePeerId(uint256,uint256,string)")]
+    #[precompile::public("updatePeerInfo(uint256,uint256,(string,bytes))")]
     #[precompile::payable]
-    fn update_peer_id(
+    fn update_peer_info(
         handle: &mut impl PrecompileHandle,
         subnet_id: U256,
         subnet_node_id: U256,
-        new_peer_id: BoundedString<ConstU32<64>>,
+        new_peer_info: (BoundedString<ConstU32<64>>, UnboundedBytes),
     ) -> EvmResult<()> {
         let subnet_id = try_u256_to_u32(subnet_id)?;
         let subnet_node_id = try_u256_to_u32(subnet_node_id)?;
-        let new_peer_id = OpaquePeerId(new_peer_id.as_bytes().to_vec());
+        let peer_multiaddr: Option<BoundedVec<u8, DefaultMaxVectorLength>> =
+            if new_peer_info.1.as_bytes().is_empty() {
+                None
+            } else {
+                Some(
+                    BoundedVec::try_from(new_peer_info.1.as_bytes().to_vec())
+                        .map_err(|_| revert("Peer multiaddr too long"))?,
+                )
+            };
+        let peer_info = PeerInfo {
+            peer_id: OpaquePeerId(new_peer_info.0.as_bytes().to_vec()),
+            multiaddr: peer_multiaddr,
+        };
 
         let origin = R::AddressMapping::into_account_id(handle.context().caller);
-        let call = pallet_network::Call::<R>::update_peer_id {
+        let call = pallet_network::Call::<R>::update_peer_info {
             subnet_id,
             subnet_node_id,
-            new_peer_id,
+            new_peer_info: peer_info,
         };
 
         RuntimeHelper::<R>::try_dispatch(
@@ -436,24 +501,35 @@ where
         Ok(())
     }
 
-    #[precompile::public("updateBootnode(uint256,uint256,string)")]
+    #[precompile::public("updateBootnodePeerInfo(uint256,uint256,(string,bytes))")]
     #[precompile::payable]
-    fn update_bootnode(
+    fn update_bootnode_peer_info(
         handle: &mut impl PrecompileHandle,
         subnet_id: U256,
         subnet_node_id: U256,
-        new_bootnode: BoundedString<ConstU32<1024>>,
+        new_peer_info: (BoundedString<ConstU32<64>>, UnboundedBytes),
     ) -> EvmResult<()> {
         let subnet_id = try_u256_to_u32(subnet_id)?;
         let subnet_node_id = try_u256_to_u32(subnet_node_id)?;
-        let new_bootnode: Option<BoundedVec<u8, DefaultMaxVectorLength>> =
-            bounded_string_to_option_bounded_vec::<1024, DefaultMaxVectorLength>(&new_bootnode)?;
+        let peer_multiaddr: Option<BoundedVec<u8, DefaultMaxVectorLength>> =
+            if new_peer_info.1.as_bytes().is_empty() {
+                None
+            } else {
+                Some(
+                    BoundedVec::try_from(new_peer_info.1.as_bytes().to_vec())
+                        .map_err(|_| revert("Peer multiaddr too long"))?,
+                )
+            };
+        let peer_info = Some(PeerInfo {
+            peer_id: OpaquePeerId(new_peer_info.0.as_bytes().to_vec()),
+            multiaddr: peer_multiaddr,
+        });
 
         let origin = R::AddressMapping::into_account_id(handle.context().caller);
-        let call = pallet_network::Call::<R>::update_bootnode {
+        let call = pallet_network::Call::<R>::update_bootnode_peer_info {
             subnet_id,
             subnet_node_id,
-            new_bootnode,
+            new_peer_info: peer_info,
         };
 
         RuntimeHelper::<R>::try_dispatch(
@@ -466,52 +542,35 @@ where
         Ok(())
     }
 
-    #[precompile::public("updateBootnodePeerId(uint256,uint256,string)")]
+    #[precompile::public("updateClientPeerInfo(uint256,uint256,(string,bytes))")]
     #[precompile::payable]
-    fn update_bootnode_peer_id(
+    fn update_client_peer_info(
         handle: &mut impl PrecompileHandle,
         subnet_id: U256,
         subnet_node_id: U256,
-        new_bootnode_peer_id: BoundedString<ConstU32<64>>,
+        new_peer_info: (BoundedString<ConstU32<64>>, UnboundedBytes),
     ) -> EvmResult<()> {
         let subnet_id = try_u256_to_u32(subnet_id)?;
         let subnet_node_id = try_u256_to_u32(subnet_node_id)?;
-        let new_bootnode_peer_id = OpaquePeerId(new_bootnode_peer_id.as_bytes().to_vec());
+        let peer_multiaddr: Option<BoundedVec<u8, DefaultMaxVectorLength>> =
+            if new_peer_info.1.as_bytes().is_empty() {
+                None
+            } else {
+                Some(
+                    BoundedVec::try_from(new_peer_info.1.as_bytes().to_vec())
+                        .map_err(|_| revert("Peer multiaddr too long"))?,
+                )
+            };
+        let peer_info = Some(PeerInfo {
+            peer_id: OpaquePeerId(new_peer_info.0.as_bytes().to_vec()),
+            multiaddr: peer_multiaddr,
+        });
 
         let origin = R::AddressMapping::into_account_id(handle.context().caller);
-        let call = pallet_network::Call::<R>::update_bootnode_peer_id {
+        let call = pallet_network::Call::<R>::update_client_peer_info {
             subnet_id,
             subnet_node_id,
-            new_bootnode_peer_id,
-        };
-
-        RuntimeHelper::<R>::try_dispatch(
-            handle,
-            RawOrigin::Signed(origin.clone()).into(),
-            call,
-            0,
-        )?;
-
-        Ok(())
-    }
-
-    #[precompile::public("updateClientPeerId(uint256,uint256,string)")]
-    #[precompile::payable]
-    fn update_client_peer_id(
-        handle: &mut impl PrecompileHandle,
-        subnet_id: U256,
-        subnet_node_id: U256,
-        new_client_peer_id: BoundedString<ConstU32<64>>,
-    ) -> EvmResult<()> {
-        let subnet_id = try_u256_to_u32(subnet_id)?;
-        let subnet_node_id = try_u256_to_u32(subnet_node_id)?;
-        let new_client_peer_id = OpaquePeerId(new_client_peer_id.as_bytes().to_vec());
-
-        let origin = R::AddressMapping::into_account_id(handle.context().caller);
-        let call = pallet_network::Call::<R>::update_client_peer_id {
-            subnet_id,
-            subnet_node_id,
-            new_client_peer_id,
+            new_peer_info: peer_info,
         };
 
         RuntimeHelper::<R>::try_dispatch(
@@ -959,34 +1018,6 @@ where
         Ok(())
     }
 
-    #[precompile::public("ownerUpdateKeyTypes(uint256,uint256[])")]
-    fn owner_update_key_types(
-        handle: &mut impl PrecompileHandle,
-        subnet_id: U256,
-        key_types: Vec<U256>,
-    ) -> EvmResult<()> {
-        let subnet_id = try_u256_to_u32(subnet_id)?;
-        let key_types: BTreeSet<KeyType> = key_types
-            .into_iter()
-            .map(|val| key_type_from_u256(val).ok_or_else(|| revert("Invalid KeyType value")))
-            .collect::<Result<_, _>>()?;
-
-        let origin = R::AddressMapping::into_account_id(handle.context().caller);
-        let call = pallet_network::Call::<R>::owner_update_key_types {
-            subnet_id,
-            key_types,
-        };
-
-        RuntimeHelper::<R>::try_dispatch(
-            handle,
-            RawOrigin::Signed(origin.clone()).into(),
-            call,
-            0,
-        )?;
-
-        Ok(())
-    }
-
     #[precompile::public("ownerUpdateMinMaxStake(uint256,uint256,uint256)")]
     fn owner_update_min_max_stake(
         handle: &mut impl PrecompileHandle,
@@ -1403,30 +1434,30 @@ where
         Ok(())
     }
 
-    #[precompile::public("updateBootnodes(uint256,string[],string[])")]
+    #[precompile::public("updateBootnodes(uint256,(string,bytes)[],string[])")]
     fn update_bootnodes(
         handle: &mut impl PrecompileHandle,
         subnet_id: U256,
-        add: Vec<BoundedString<ConstU32<1024>>>,
-        remove: Vec<BoundedString<ConstU32<1024>>>,
+        add: Vec<(BoundedString<ConstU32<64>>, UnboundedBytes)>,
+        remove: Vec<BoundedString<ConstU32<64>>>,
     ) -> EvmResult<()> {
         let subnet_id = try_u256_to_u32(subnet_id)?;
 
-        let add: BTreeSet<BoundedVec<u8, DefaultMaxVectorLength>> = add
+        let add: BTreeMap<OpaquePeerId, BoundedVec<u8, DefaultMaxVectorLength>> = add
             .into_iter()
-            .map(|add| -> Result<_, PrecompileFailure> {
-                let value: BoundedVec<u8, DefaultMaxVectorLength> =
-                    bounded_string_to_bounded_vec::<1024, DefaultMaxVectorLength>(&add)?;
-                Ok(value)
+            .map(|(peer_id, bootnode_bytes)| {
+                let peer_id = OpaquePeerId(peer_id.as_bytes().to_vec());
+                let bootnode = BoundedVec::try_from(bootnode_bytes.as_bytes().to_vec())
+                    .map_err(|_| revert("Bootnode address too long"));
+                Ok::<_, PrecompileFailure>((peer_id, bootnode?))
             })
             .collect::<Result<_, _>>()?;
 
-        let remove: BTreeSet<BoundedVec<u8, DefaultMaxVectorLength>> = remove
+        let remove: BTreeSet<OpaquePeerId> = remove
             .into_iter()
             .map(|remove| -> Result<_, PrecompileFailure> {
-                let value: BoundedVec<u8, DefaultMaxVectorLength> =
-                    bounded_string_to_bounded_vec::<1024, DefaultMaxVectorLength>(&remove)?;
-                Ok(value)
+                let peer_id = OpaquePeerId(remove.as_bytes().to_vec());
+                Ok(peer_id)
             })
             .collect::<Result<_, _>>()?;
 
@@ -1701,19 +1732,6 @@ where
             .collect();
 
         Ok(coldkeys)
-    }
-
-    #[precompile::public("getKeyTypes(uint256)")]
-    #[precompile::view]
-    fn get_key_types(handle: &mut impl PrecompileHandle, subnet_id: U256) -> EvmResult<Vec<U256>> {
-        let subnet_id = try_u256_to_u32(subnet_id)?;
-        handle.record_cost(RuntimeHelper::<R>::db_read_gas_cost())?;
-
-        let result = pallet_network::SubnetKeyTypes::<R>::get(subnet_id);
-
-        let key_types: Vec<U256> = result.into_iter().map(|k| U256::from(k as u32)).collect();
-
-        Ok(key_types)
     }
 
     #[precompile::public("getMinStake(uint256)")]
@@ -1995,7 +2013,7 @@ where
         Ok(result)
     }
 
-    #[precompile::public("getValidatorAbsentSubnetNodeReputationFactor(uint256)")]
+    #[precompile::public("getValidatorAbsentDecreaseReputationFactor(uint256)")]
     #[precompile::view]
     fn get_validator_absent_subnet_node_reputation_factor(
         handle: &mut impl PrecompileHandle,
@@ -2004,7 +2022,7 @@ where
         let subnet_id = try_u256_to_u32(subnet_id)?;
         handle.record_cost(RuntimeHelper::<R>::db_read_gas_cost())?;
 
-        let result = pallet_network::ValidatorAbsentSubnetNodeReputationFactor::<R>::get(subnet_id);
+        let result = pallet_network::ValidatorAbsentDecreaseReputationFactor::<R>::get(subnet_id);
 
         Ok(result)
     }
@@ -2049,15 +2067,20 @@ where
     fn get_bootnodes(
         handle: &mut impl PrecompileHandle,
         subnet_id: U256,
-    ) -> EvmResult<Vec<UnboundedBytes>> {
+    ) -> EvmResult<Vec<(UnboundedBytes, UnboundedBytes)>> {
         let subnet_id = try_u256_to_u32(subnet_id)?;
         handle.record_cost(RuntimeHelper::<R>::db_read_gas_cost())?;
 
         let result = pallet_network::SubnetBootnodes::<R>::get(subnet_id);
 
-        let bootnodes: Vec<UnboundedBytes> = result
+        let bootnodes: Vec<(UnboundedBytes, UnboundedBytes)> = result
             .into_iter()
-            .map(|bounded_vec| UnboundedBytes::from(bounded_vec.to_vec()))
+            .map(|(peer_id, multiaddr)| {
+                (
+                    UnboundedBytes::from(peer_id.0.to_vec()),
+                    UnboundedBytes::from(multiaddr.to_vec()),
+                )
+            })
             .collect();
 
         Ok(bootnodes)
@@ -2155,16 +2178,6 @@ fn try_u32_to_u256(value: u32) -> Result<U256, PrecompileFailure> {
     value.try_into().map_err(|_| PrecompileFailure::Error {
         exit_status: ExitError::Other("u32 out of bounds".into()),
     })
-}
-
-fn key_type_from_u256(val: U256) -> Option<KeyType> {
-    match val.as_u32() {
-        0 => Some(KeyType::Rsa),
-        1 => Some(KeyType::Ed25519),
-        2 => Some(KeyType::Secp256k1),
-        3 => Some(KeyType::Ecdsa),
-        _ => None,
-    }
 }
 
 fn bounded_string_to_option_bounded_vec<const N: u32, T>(

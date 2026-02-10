@@ -278,8 +278,8 @@ impl<T: Config> Pallet<T> {
                     Error::<T>::InvalidSubnetNodeId
                 );
 
-                let block = params.block;
-                let subnet_epoch_data = Self::attestor_subnet_epoch_data(subnet_id, block)
+                let proposal_block = params.block;
+                let subnet_epoch_data = Self::attestor_subnet_epoch_data(subnet_id, proposal_block)
                     .ok_or(Error::<T>::SubnetEpochDataIsNone)?;
                 let subnet_epoch_progression = subnet_epoch_data.subnet_epoch_progression;
 
@@ -314,16 +314,6 @@ impl<T: Config> Pallet<T> {
         Ok(Pays::No.into())
     }
 
-    pub fn get_attestor_reward_multiplier(progress: u128) -> u128 {
-        Self::get_f64_as_percentage(Self::concave_down_decreasing(
-            Self::get_percent_as_f64(progress),
-            Self::get_percent_as_f64(AttestorMinRewardFactor::<T>::get()),
-            1.0,
-            AttestorRewardExponent::<T>::get() as f64,
-        ))
-        .clamp(0, Self::percentage_factor_as_u128())
-    }
-
     pub fn get_validator_reward_multiplier(progress: u128) -> u128 {
         Self::get_f64_as_percentage(Self::sigmoid_decreasing(
             Self::get_percent_as_f64(progress),
@@ -331,6 +321,25 @@ impl<T: Config> Pallet<T> {
             ValidatorRewardK::<T>::get() as f64,
             0.0,
             1.0,
+        ))
+        .clamp(0, Self::percentage_factor_as_u128())
+
+        // Self::get_f64_as_percentage(Self::sigmoid_decreasing_start_offset(
+        //     Self::get_percent_as_f64(progress),
+        //     Self::get_percent_as_f64(ValidatorRewardMidpoint::<T>::get()),
+        //     ValidatorRewardK::<T>::get() as f64,
+        //     0.05, // x offset (gives leeway for submission so it doesn't need to be on block step 0 to get 100%)
+        //     4.0,
+        // ))
+        // .clamp(0, Self::percentage_factor_as_u128())
+    }
+
+    pub fn get_attestor_reward_multiplier(progress: u128) -> u128 {
+        Self::get_f64_as_percentage(Self::concave_down_decreasing(
+            Self::get_percent_as_f64(progress),
+            Self::get_percent_as_f64(AttestorMinRewardFactor::<T>::get()),
+            1.0,
+            AttestorRewardExponent::<T>::get() as f64,
         ))
         .clamp(0, Self::percentage_factor_as_u128())
     }
@@ -425,11 +434,13 @@ impl<T: Config> Pallet<T> {
         let reputation_decrease_factor =
             ValidatorNonConsensusSubnetNodeReputationFactor::<T>::get(subnet_id);
         let decrease_factor = Self::percent_mul(reputation_decrease_factor, attestation_delta);
-        let mut reputation = SubnetNodeReputation::<T>::get(subnet_id, subnet_node_id);
-        weight = weight.saturating_add(db_weight.reads(2));
-        reputation = Self::get_decrease_reputation(reputation, decrease_factor);
-        SubnetNodeReputation::<T>::insert(subnet_id, subnet_node_id, reputation);
-        weight = weight.saturating_add(db_weight.writes(1));
+        let reputation = Self::decrease_and_return_node_reputation(
+            subnet_id,
+            subnet_node_id,
+            SubnetNodeReputation::<T>::get(subnet_id, subnet_node_id),
+            decrease_factor,
+        );
+        weight = weight.saturating_add(db_weight.reads_writes(2, 1));
 
         weight = weight.saturating_add(db_weight.reads(1));
         if let Ok(coldkey) = HotkeyOwner::<T>::try_get(&hotkey) {
