@@ -206,6 +206,9 @@ impl<T: Config> Pallet<T> {
         })
     }
 
+    /// Returns the current subnet epoch and the subnet epoch progression.
+    ///
+    /// This function is used to determine the current subnet epoch and the subnet epoch progression.
     pub fn get_current_subnet_epoch_data(subnet_id: u32) -> Option<SubnetEpochData> {
         let epoch_length = T::EpochLength::get();
         let subnet_slot = match SubnetSlot::<T>::try_get(subnet_id) {
@@ -364,10 +367,10 @@ impl<T: Config> Pallet<T> {
             // --- Pause logic
             if data.state == SubnetState::Paused {
                 if data.start_epoch + max_pause_epochs < epoch {
-                    let subnet_reputation = SubnetReputation::<T>::get(subnet_id);
-                    let new_subnet_reputation = Self::get_decrease_reputation(
-                        subnet_reputation,
+                    let new_subnet_reputation = Self::decrease_rep(
+                        SubnetReputation::<T>::get(subnet_id),
                         MaxPauseEpochsSubnetReputationFactor::<T>::get(),
+                        None,
                     );
                     SubnetReputation::<T>::insert(subnet_id, new_subnet_reputation);
                     weight_meter.consume(db_weight.reads_writes(2, 1));
@@ -418,10 +421,10 @@ impl<T: Config> Pallet<T> {
             let electable_nodes = TotalSubnetElectableNodes::<T>::get(subnet_id);
 
             if electable_nodes < min_subnet_nodes {
-                let subnet_reputation = SubnetReputation::<T>::get(subnet_id);
-                let new_subnet_reputation = Self::get_decrease_reputation(
-                    subnet_reputation,
+                let new_subnet_reputation = Self::decrease_rep(
+                    SubnetReputation::<T>::get(subnet_id),
                     LessThanMinNodesSubnetReputationFactor::<T>::get(),
+                    None,
                 );
                 SubnetReputation::<T>::insert(subnet_id, new_subnet_reputation);
                 weight_meter.consume(db_weight.reads_writes(2, 1));
@@ -503,9 +506,5 @@ impl<T: Config> Pallet<T> {
             // --- Insert validator for next epoch
             SubnetElectedValidator::<T>::insert(subnet_id, subnet_epoch, node_id);
         }
-    }
-
-    fn get_last_overwatch_epoch(current_epoch: u32, submit_interval: u32) -> u32 {
-        current_epoch - (current_epoch % submit_interval)
     }
 }

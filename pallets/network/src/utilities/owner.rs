@@ -12,12 +12,23 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// Handles all owner related subnet operations
+// See all storage elements for docs in `lib.rs`
 
 use super::*;
 use libm::{ceil, log};
 
 impl<T: Config> Pallet<T> {
     /// Owner pause subnet for up to max period
+    ///
+    /// This will pause the following logic on the next subnet epoch start block step:
+    /// - Elect validator
+    /// - Activate nodes from the queue
+    /// - Update the node burn rate
+    ///
+    /// If a validator is currently elected, it will not stop consensus from proceeding
+    /// in the current epoch.
     pub fn do_owner_pause_subnet(origin: T::RuntimeOrigin, subnet_id: u32) -> DispatchResult {
         let coldkey: T::AccountId = ensure_signed(origin)?;
 
@@ -53,6 +64,11 @@ impl<T: Config> Pallet<T> {
 
             Ok(())
         })?;
+
+        // ---
+        // We don't need to remove SubnetConsensusSubmission here because
+        // precheck_subnet_consensus_submission already checks if the subnet is active and not paused
+        // ---
 
         Self::deposit_event(Event::SubnetPaused {
             subnet_id: subnet_id,
@@ -90,6 +106,7 @@ impl<T: Config> Pallet<T> {
             let delta = epoch.saturating_sub(pause_epoch).saturating_add(1); // Add +1 to offset the subnet slots
 
             // Update each registration queued node
+            // Move each nodes start_epoch forward by the amount of epochs the subnet was paused
             for (subnet_id, uid, _) in RegisteredSubnetNodesData::<T>::iter() {
                 RegisteredSubnetNodesData::<T>::mutate(subnet_id, uid, |subnet_node| {
                     let curr_start_epoch = subnet_node.classification.start_epoch;
@@ -100,6 +117,9 @@ impl<T: Config> Pallet<T> {
             // Update state
             params.state = SubnetState::Active;
 
+            // We start them on the next epoch following the current epoch
+            // This protects the network against an owner pausing a subnet and then unpausing it in a single epoch to manipulate
+            // the attestation ratios (see ``precheck_subnet_consensus_submission`` `max_attestors`)
             params.start_epoch = epoch + 1;
 
             Ok(())
@@ -145,10 +165,12 @@ impl<T: Config> Pallet<T> {
             Error::<T>::SubnetMustBePaused
         );
 
+        // Remove duplicate subnet node ids
         subnet_node_ids.dedup_by(|a, b| a == b);
 
         let subnet_epoch = Self::get_current_subnet_epoch_as_u32(subnet_id);
 
+        // Filter out subnet node ids that are not validators
         subnet_node_ids.retain(|id| match SubnetNodesData::<T>::try_get(subnet_id, id) {
             Ok(subnet_node) => {
                 subnet_node.has_classification(&SubnetNodeClass::Validator, subnet_epoch)
@@ -156,18 +178,87 @@ impl<T: Config> Pallet<T> {
             Err(()) => false,
         });
 
+        // Ensure the number of subnet node ids is at least >= min subnet nodes requirement
         ensure!(
             subnet_node_ids.len() as u32 >= MinSubnetNodes::<T>::get(),
             Error::<T>::InvalidMinEmergencySubnetNodes
         );
 
+        // Ensure the number of subnet node ids is at most <= max subnet nodes requirement
         ensure!(
             subnet_node_ids.len() as u32 <= MaxEmergencySubnetNodes::<T>::get(),
             Error::<T>::InvalidMaxEmergencySubnetNodes
         );
 
-        let target_emergency_epochs = Self::get_max_steps_for_node_removal(subnet_id);
+        // Calculate the target emergency epochs
+        let target_emergency_epochs = Self::get_max_steps_for_node_removal(subnet_id) + 1;
 
+        // Insert emergency subnet validator data
+        EmergencySubnetNodeElectionData::<T>::insert(
+            subnet_id,
+            EmergencySubnetValidatorData {
+                subnet_node_ids: subnet_node_ids.clone(),
+                target_emergency_validators_epochs: target_emergency_epochs,
+                total_epochs: 0,
+                max_emergency_validators_epoch: 0,
+            },
+        );
+
+        Self::deposit_event(Event::SubnetForked {
+            subnet_id: subnet_id,
+            owner: coldkey,
+            subnet_node_ids,
+        });
+
+        Ok(())
+    }
+
+    pub fn do_owner_set_emergency_validator_set_v2(
+        origin: T::RuntimeOrigin,
+        subnet_id: u32,
+        mut subnet_node_ids: Vec<u32>,
+    ) -> DispatchResult {
+        let coldkey: T::AccountId = ensure_signed(origin)?;
+
+        ensure!(
+            Self::is_subnet_owner(&coldkey, subnet_id).unwrap_or(false),
+            Error::<T>::NotSubnetOwner
+        );
+
+        ensure!(
+            Self::is_subnet_paused(subnet_id).unwrap_or(false),
+            Error::<T>::SubnetMustBePaused
+        );
+
+        // Remove duplicate subnet node ids
+        subnet_node_ids.dedup_by(|a, b| a == b);
+
+        let subnet_epoch = Self::get_current_subnet_epoch_as_u32(subnet_id);
+
+        // Filter out subnet node ids that are not validators
+        subnet_node_ids.retain(|id| match SubnetNodesData::<T>::try_get(subnet_id, id) {
+            Ok(subnet_node) => {
+                subnet_node.has_classification(&SubnetNodeClass::Validator, subnet_epoch)
+            }
+            Err(()) => false,
+        });
+
+        // Ensure the number of subnet node ids is at least >= min subnet nodes requirement
+        ensure!(
+            subnet_node_ids.len() as u32 >= MinSubnetNodes::<T>::get(),
+            Error::<T>::InvalidMinEmergencySubnetNodes
+        );
+
+        // Ensure the number of subnet node ids is at most <= max subnet nodes requirement
+        ensure!(
+            subnet_node_ids.len() as u32 <= MaxEmergencySubnetNodes::<T>::get(),
+            Error::<T>::InvalidMaxEmergencySubnetNodes
+        );
+
+        // Calculate the target emergency epochs
+        let target_emergency_epochs = Self::get_max_steps_for_node_removal(subnet_id) + 1;
+
+        // Insert emergency subnet validator data
         EmergencySubnetNodeElectionData::<T>::insert(
             subnet_id,
             EmergencySubnetValidatorData {
@@ -189,6 +280,7 @@ impl<T: Config> Pallet<T> {
 
     /// Get the required epochs to have a node removed based on not being in consensus data
     /// based on the `AbsentDecreaseReputationFactor`
+    /// i.e. if a node is not in consensus data, it will be removed after this many epochs
     fn get_max_steps_for_node_removal(subnet_id: u32) -> u32 {
         let one: f64 = Self::get_percent_as_f64(Self::percentage_factor_as_u128());
 
@@ -217,6 +309,14 @@ impl<T: Config> Pallet<T> {
         n2
     }
 
+    /// Owner can remove the emergency validator set at any time
+    ///
+    /// # Arguments
+    /// * `origin` - The origin of the transaction
+    /// * `subnet_id` - The id of the subnet
+    ///
+    /// # Returns
+    /// * `DispatchResult` - The result of the transaction
     pub fn do_owner_revert_emergency_validator_set(
         origin: T::RuntimeOrigin,
         subnet_id: u32,
@@ -226,6 +326,13 @@ impl<T: Config> Pallet<T> {
         ensure!(
             Self::is_subnet_owner(&coldkey, subnet_id).unwrap_or(false),
             Error::<T>::NotSubnetOwner
+        );
+
+        // Subnet must be paused to revert emergency validator set
+        // This ensures owner cannot manipulate the attestation ratio
+        ensure!(
+            Self::is_subnet_paused(subnet_id).unwrap_or(false),
+            Error::<T>::SubnetMustBePaused
         );
 
         EmergencySubnetNodeElectionData::<T>::remove(subnet_id);
@@ -238,6 +345,14 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
+    /// Owner can fully remove the subnet
+    ///
+    /// # Arguments
+    /// * `origin` - The origin of the transaction
+    /// * `subnet_id` - The id of the subnet
+    ///
+    /// # Returns
+    /// * `DispatchResult` - The result of the transaction
     pub fn do_owner_deactivate_subnet(origin: T::RuntimeOrigin, subnet_id: u32) -> DispatchResult {
         let coldkey: T::AccountId = ensure_signed(origin)?;
 
@@ -548,10 +663,10 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
-    pub fn do_owner_add_or_update_initial_coldkeys(
+    pub fn do_owner_add_or_update_initial_validators(
         origin: T::RuntimeOrigin,
         subnet_id: u32,
-        coldkeys: BTreeMap<T::AccountId, u32>,
+        validators: BTreeMap<u32, u32>,
     ) -> DispatchResult {
         let coldkey: T::AccountId = ensure_signed(origin)?;
 
@@ -566,28 +681,32 @@ impl<T: Config> Pallet<T> {
         );
 
         ensure!(
-            coldkeys.values().all(|&value| value >= 1),
+            validators.values().all(|&value| value >= 1),
             Error::<T>::InvalidSubnetRegistrationInitialColdkeys
         );
 
-        SubnetRegistrationInitialColdkeys::<T>::mutate(subnet_id, |accounts| {
-            let accounts_set = accounts.get_or_insert_with(BTreeMap::new);
-            accounts_set.extend(coldkeys.iter().map(|(k, v)| (k.clone(), *v)));
+        NodeRegistrationInitialValidatorIds::<T>::mutate(subnet_id, |maybe_validators| {
+            let validators_set = maybe_validators.get_or_insert_with(BTreeMap::new);
+            validators_set.extend(
+                validators
+                    .iter()
+                    .map(|(&validator_id, &max_registrations)| (validator_id, max_registrations)),
+            );
         });
 
-        Self::deposit_event(Event::AddSubnetRegistrationInitialColdkeys {
+        Self::deposit_event(Event::AddSubnetRegistrationInitialValidators {
             subnet_id: subnet_id,
             owner: coldkey,
-            coldkeys: coldkeys,
+            validators: validators,
         });
 
         Ok(())
     }
 
-    pub fn do_owner_remove_initial_coldkeys(
+    pub fn do_owner_remove_initial_validators(
         origin: T::RuntimeOrigin,
         subnet_id: u32,
-        coldkeys: BTreeSet<T::AccountId>,
+        validators: BTreeSet<u32>,
     ) -> DispatchResult {
         let coldkey: T::AccountId = ensure_signed(origin)?;
 
@@ -601,24 +720,24 @@ impl<T: Config> Pallet<T> {
             Error::<T>::SubnetMustBeRegistering
         );
 
-        SubnetRegistrationInitialColdkeys::<T>::mutate(subnet_id, |maybe_accounts| {
-            if let Some(existing_accounts) = maybe_accounts {
-                // Remove all accounts that exist in coldkeys
-                for account in &coldkeys {
-                    existing_accounts.remove(account);
+        NodeRegistrationInitialValidatorIds::<T>::mutate(subnet_id, |maybe_validators| {
+            if let Some(existing_validators) = maybe_validators {
+                // Remove the requested validators from storage.
+                for validator_id in &validators {
+                    existing_validators.remove(validator_id);
                 }
 
                 // Clean up if the set becomes empty
-                if existing_accounts.is_empty() {
-                    *maybe_accounts = None;
+                if existing_validators.is_empty() {
+                    *maybe_validators = None;
                 }
             }
         });
 
-        Self::deposit_event(Event::RemoveSubnetRegistrationInitialColdkeys {
+        Self::deposit_event(Event::RemoveSubnetRegistrationInitialValidators {
             subnet_id: subnet_id,
             owner: coldkey,
-            coldkeys: coldkeys,
+            validators: validators,
         });
 
         Ok(())

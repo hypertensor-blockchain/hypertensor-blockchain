@@ -132,6 +132,17 @@ impl<T: Config> Pallet<T> {
         }
     }
 
+    pub fn is_subnet_active_and_live(subnet_id: u32, epoch: u32) -> Option<bool> {
+        match SubnetsData::<T>::try_get(subnet_id) {
+            Ok(subnet) => Some(Self::_is_subnet_active_and_live(&subnet, epoch)),
+            Err(()) => None,
+        }
+    }
+
+    pub fn _is_subnet_active_and_live(subnet: &SubnetData, epoch: u32) -> bool {
+        subnet.state == SubnetState::Active && subnet.start_epoch <= epoch
+    }
+
     pub fn is_subnet_paused(subnet_id: u32) -> Option<bool> {
         match SubnetsData::<T>::try_get(subnet_id) {
             Ok(subnet) => Some(subnet.state == SubnetState::Paused),
@@ -180,19 +191,10 @@ impl<T: Config> Pallet<T> {
             Self::get_percent_as_f64(alpha),
         );
 
-        // price = min_price + diff * concave_factor
-        // let addend: u128 = (diff as f64 * concave_factor)
-        //   .clamp(0.0, u128::MAX as f64)   // clamp the float
-        //   as u128;                        // now safe to cast
-
         let safe_diff_f64 = (diff as f64).min(u128::MAX as f64 / concave_factor); // prevent inf
         let addend = (safe_diff_f64 * concave_factor).clamp(0.0, u128::MAX as f64) as u128;
 
         let decayed = min_price.saturating_add(addend);
-
-        // let decayed = min_price.saturating_add(
-        //   (diff as f64 * concave_factor) as u128
-        // );
 
         decayed.min(u128::MAX).max(min_price)
     }
